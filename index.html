@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Hydra v25 — Calculadora de Redes Hidráulicas</title>
+<link rel="stylesheet" href="libs/fuentes/fuentes.css">
+<link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+
+<!-- ══════════ TOOLBAR ══════════ -->
+<div class="toolbar">
+  <span class="tb-logo">HYDRA</span>
+  <div class="tb-sep"></div>
+
+  <span class="tb-label">Modo</span>
+  <div class="tb-group" id="mode-btns">
+    <button class="tb-btn active" id="mode-select" onclick="setMode('select')" title="Seleccionar (S)">↖ Select</button>
+    <button class="tb-btn green" id="mode-node"   onclick="setMode('node')"   title="Agregar nodo (N)">⬤ Nodo</button>
+    <button class="tb-btn blue"  id="mode-arc"    onclick="setMode('arc')"    title="Agregar arco (A)">— Arco</button>
+    <button class="tb-btn"       id="mode-pan"    onclick="setMode('pan')"    title="Mover vista (P)">✥ Pan</button>
+  </div>
+
+  <div class="tb-sep"></div>
+  <span class="tb-label">Tipo nodo</span>
+  <div class="tb-group" id="node-type-btns">
+    <button class="tb-btn blue   active" id="nt-junction"  onclick="setNodeType('junction')"  title="Nodo con demanda">⬤ Junction</button>
+    <button class="tb-btn"               id="nt-tank"      onclick="setNodeType('tank')"      title="Tanque nivel variable">⊙ Tanque</button>
+  </div>
+
+  <div class="tb-sep"></div>
+  <span class="tb-label">Tipo arco</span>
+  <div class="tb-group" id="arc-type-btns">
+    <button class="tb-btn active"  id="at-pipe"  onclick="setArcType('pipe')"  title="Tubería">— Tubería</button>
+    <button class="tb-btn violet"  id="at-pump"  onclick="setArcType('pump')"  title="Bomba">⟳ Bomba</button>
+    <button class="tb-btn red"     id="at-valve" onclick="setArcType('valve')" title="Válvula PRV/FCV/check">⊘ Válvula</button>
+    <button class="tb-btn amber"   id="at-equip" onclick="setArcType('equip')" title="Equipo de proceso (HX, filtro...)">▦ Equipo</button>
+  </div>
+
+  <div class="tb-sep"></div>
+  <button class="tb-btn green" onclick="runSolver()" title="Calcular red (Enter)">▶ Calcular</button>
+  <button class="tb-btn red"   onclick="clearSelection();if(confirm('¿Limpiar toda la red?')){clearNetwork()}" title="Limpiar red">✕ Limpiar</button>
+
+  <div class="tb-sep"></div>
+  <div class="tb-group">
+    <button class="tb-btn" id="btn-undo" onclick="undo()" title="Deshacer (Ctrl+Z)" disabled>↩ Undo</button>
+    <button class="tb-btn" id="btn-redo" onclick="redo()" title="Rehacer (Ctrl+Y)" disabled>↪ Redo</button>
+  </div>
+
+  <div class="tb-right">
+    <div class="solver-status idle" id="solver-status">Sin calcular</div>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" onclick="saveProject()" title="Guardar JSON">💾 Guardar</button>
+    <label class="tb-btn" title="Cargar JSON">📂 Cargar<input type="file" accept=".json" onchange="loadProject(this)" style="display:none"></label>
+    <button class="tb-btn green" onclick="exportExcel()" title="Exportar a Excel">📊 Excel</button>
+    <button class="tb-btn" onclick="openProjectModal(true)" title="Exportar PDF profesional (pide revision antes)">📄 PDF</button>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" id="btn-iso" onclick="toggleIsoView()" title="Vista Isométrica">🧊 3D</button>
+    <button class="tb-btn violet" onclick="openCatalogModal()" title="Catálogo de bombas">⛯ Catálogo</button>
+    <button class="tb-btn" onclick="openProjectModal()" title="Datos del proyecto">🗒 Proyecto</button>
+    <div class="tb-badge">v25</div>
+  </div>
+</div>
+
+<!-- ══════════ MAIN LAYOUT ══════════ -->
+<div class="main-layout" id="main-layout">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sb-tabs">
+      <button class="sb-tab active" onclick="showSBPane('props')" id="tab-props">Propiedades</button>
+      <button class="sb-tab"        onclick="showSBPane('nodes')" id="tab-nodes">Nodos</button>
+      <button class="sb-tab"        onclick="showSBPane('arcs')"  id="tab-arcs">Arcos</button>
+      <button class="sb-tab"        onclick="showSBPane('fluid')" id="tab-fluid">Fluido</button>
+    </div>
+
+    <!-- PROPIEDADES -->
+    <div class="sb-pane active" id="pane-props">
+      <div class="empty-msg" id="props-empty">
+        Seleccioná un nodo o arco para editar sus propiedades.<br><br>
+        <span style="color:var(--teal);font-size:10px">S → Seleccionar &nbsp;·&nbsp; N → Nodo &nbsp;·&nbsp; A → Arco</span>
+      </div>
+      <div id="props-content" style="display:none"></div>
+    </div>
+
+    <!-- NODOS -->
+    <div class="sb-pane" id="pane-nodes">
+      <div class="sb-section">
+        <div class="sb-hdr">Nodos en la red</div>
+        <div id="nodes-list"><div class="empty-msg">Sin nodos. Usá modo N para agregar.</div></div>
+      </div>
+    </div>
+
+    <!-- ARCOS -->
+    <div class="sb-pane" id="pane-arcs">
+      <div class="sb-section">
+        <div class="sb-hdr">Arcos en la red</div>
+        <div id="arcs-list"><div class="empty-msg">Sin arcos. Usá modo A para agregar.</div></div>
+      </div>
+    </div>
+
+    <!-- FLUIDO -->
+    <div class="sb-pane" id="pane-fluid">
+      <div class="sb-section">
+        <div class="sb-hdr">Fluido</div>
+        <div>
+          <label>Tipo</label>
+          <select id="fluid-type" onchange="onFluidChange()">
+            <option value="water">Agua</option>
+            <option value="custom">Personalizado</option>
+          </select>
+        </div>
+        <div>
+          <label>Temperatura [°C]</label>
+          <input type="text" inputmode="decimal" id="fluid-temp" value="20" min="5" max="95" step="5" oninput="onFluidChange()">
+        </div>
+        <div id="custom-fluid" style="display:none">
+          <div><label>Nombre del fluido</label><input type="text" id="fluid-name" placeholder="Fluido personalizado" oninput="onFluidChange()"></div>
+          <div class="row2">
+            <div><label>ρ [kg/m³]</label><input type="text" inputmode="decimal" id="fluid-rho" value="998.2" step="0.1" oninput="onFluidChange()"></div>
+            <div><label>ν [×10⁻⁶ m²/s]</label><input type="text" inputmode="decimal" id="fluid-nu" value="1.004" step="0.001" oninput="onFluidChange()"></div>
+          </div>
+        </div>
+        <div class="info-box" id="fluid-info">ρ = 998.2 kg/m³ · ν = 1.004×10⁻⁶ m²/s</div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-hdr">Opciones de cálculo</div>
+        <div>
+          <label>Tolerancia convergencia</label>
+          <select id="solver-tol">
+            <option value="1e-6">Alta (1e-6)</option>
+            <option value="1e-4" selected>Normal (1e-4)</option>
+            <option value="1e-3">Rápida (1e-3)</option>
+          </select>
+        </div>
+        <div>
+          <label>Max iteraciones</label>
+          <input type="number" id="solver-maxiter" value="100" min="10" max="500" step="10">
+        </div>
+        <div class="info-box">El solver usa Newton-Raphson global con Jacobiano analítico. Converge en 4–12 iteraciones para redes bien definidas.</div>
+        <div style="margin-top:10px">
+          <label>Caudal requerido Q<sub>req</sub> [m³/h]</label>
+          <input type="number" id="q-required" value="0" min="0" step="5"
+            oninput="fluid.q_required=+(this.value)||0;if(state.results?.ok)renderKPIs()">
+          <div class="info-box" style="margin-top:4px">Ingresá el caudal del proceso: el sistema indica si la bomba cumple.</div>
+        </div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-hdr">Visualización</div>
+        <div>
+          <label>Colorear arcos por</label>
+          <select id="color-by" onchange="renderNetwork()">
+            <option value="type">Tipo de elemento</option>
+            <option value="velocity">Velocidad</option>
+            <option value="headloss">Pérdida de carga</option>
+            <option value="flow">Caudal</option>
+          </select>
+        </div>
+        <div>
+          <label>Etiquetas en arcos</label>
+          <select id="arc-label" onchange="renderNetwork()">
+            <option value="none">Sin etiquetas</option>
+            <option value="Q" selected>Caudal Q [m³/h]</option>
+            <option value="V">Velocidad V [m/s]</option>
+            <option value="hf">Pérdida hf [m]</option>
+            <option value="name">Nombre</option>
+          </select>
+        </div>
+        <div>
+          <label>Etiquetas en nodos</label>
+          <select id="node-label" onchange="renderNetwork()">
+            <option value="name" selected>Nombre</option>
+            <option value="H">Cabeza H [m]</option>
+            <option value="P">Presión P [bar]</option>
+            <option value="both">Nombre + H</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div><!-- /sidebar -->
+
+<!-- MODAL DATOS DEL PROYECTO -->
+<div class="modal-overlay" id="modal-project">
+  <div class="modal" style="width:440px">
+    <div class="modal-title" id="modal-project-title">🗒 Datos del Proyecto</div>
+    <div id="modal-project-body">
+      <div class="row2">
+        <div><label>Nombre del proyecto</label><input type="text" id="proj-name" placeholder="Red de bombeo..."></div>
+        <div><label>Número de revisión</label><input type="text" id="proj-rev" placeholder="Rev. 0"></div>
+      </div>
+      <div class="row2">
+        <div><label>Cliente</label><input type="text" id="proj-client" placeholder="Empresa S.A."></div>
+        <div><label>Ingeniero</label><input type="text" id="proj-engineer" placeholder="Nombre Apellido"></div>
+      </div>
+      <label>Notas / observaciones</label>
+      <textarea id="proj-notes" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:11px;padding:6px 8px;resize:vertical;min-height:60px;outline:none;margin-bottom:7px" placeholder="Descripción del sistema, condiciones de operación..."></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn" onclick="cancelProjectModal()">Cancelar</button>
+      <button class="modal-btn primary" id="modal-project-save-btn" onclick="saveProjectMeta()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL CATÁLOGO DE BOMBAS -->
+<div class="modal-overlay" id="modal-catalog">
+  <div class="modal" style="width:520px;max-height:85vh">
+    <div class="modal-title">⛯ Catálogo de Bombas</div>
+    <div style="margin-bottom:8px;display:flex;gap:6px;align-items:center">
+      <input type="text" id="cat-search" placeholder="Buscar por nombre o fabricante…" style="flex:1;margin-bottom:0" oninput="renderCatalogList()">
+      <button class="modal-btn primary" onclick="openAddPumpModal()" style="white-space:nowrap">+ Nueva bomba</button>
+    </div>
+    <div id="catalog-list" style="max-height:44vh;overflow-y:auto;margin-bottom:8px"></div>
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <button class="modal-btn" onclick="exportCatalog()" style="font-size:10px">💾 Exportar catálogo</button>
+      <label class="modal-btn" style="font-size:10px;cursor:pointer">📂 Importar catálogo<input type="file" accept=".json" onchange="importCatalog(this)" style="display:none"></label>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn" onclick="document.getElementById('modal-catalog').classList.remove('open')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL AGREGAR/EDITAR BOMBA AL CATÁLOGO -->
+<div class="modal-overlay" id="modal-add-pump">
+  <div class="modal" style="width:420px">
+    <div class="modal-title" id="add-pump-title">Nueva Bomba</div>
+    <input type="hidden" id="edit-pump-id">
+    <div class="row2">
+      <div><label>Fabricante</label><input type="text" id="cat-maker" placeholder="Grundfos, KSB…"></div>
+      <div><label>Modelo</label><input type="text" id="cat-model" placeholder="CM3-5…"></div>
+    </div>
+    <div class="row2">
+      <div><label>Stock disponible</label><input type="number" id="cat-stock" value="1" min="0" step="1"></div>
+      <div><label>Notas</label><input type="text" id="cat-pump-notes" placeholder="Observaciones…"></div>
+    </div>
+    <div class="prop-sep">Curva H-Q (una fila: Q[m³/h]  H[m])</div>
+    <textarea id="cat-hq" class="pump-pts" style="min-height:80px" placeholder="0	50&#10;100	45&#10;200	35&#10;300	20&#10;350	0"></textarea>
+    <div class="prop-sep">Curva P-Q (opcional: Q[m³/h]  P[kW])</div>
+    <textarea id="cat-pq" class="pump-pts" style="min-height:50px" placeholder="0	15&#10;200	18&#10;350	22"></textarea>
+    <div class="modal-footer">
+      <button class="modal-btn" onclick="document.getElementById('modal-add-pump').classList.remove('open')">Cancelar</button>
+      <button class="modal-btn primary" onclick="savePumpToCatalog()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+  <!-- CANVAS -->
+  <div class="canvas-area" id="canvas-area">
+    <svg id="net-svg" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arrow-teal" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto">
+          <path d="M1 1L7 4L1 7" fill="none" stroke="#2dd4bf" stroke-width="1.5" stroke-linejoin="round"/>
+        </marker>
+        <marker id="arrow-teal-rev" viewBox="0 0 8 8" refX="1" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M7 1L1 4L7 7" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-linejoin="round"/>
+        </marker>
+        <marker id="arrow-violet" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto">
+          <path d="M1 1L7 4L1 7" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-linejoin="round"/>
+        </marker>
+        <marker id="arrow-amber" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto">
+          <path d="M1 1L7 4L1 7" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-linejoin="round"/>
+        </marker>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="2.5" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-sm">
+          <feGaussianBlur stdDeviation="1.5" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <g id="canvas-root"></g>
+    </svg>
+    <div class="canvas-hint" id="canvas-hint">Click para agregar nodo · Esc para cancelar</div>
+    <div class="zoom-ctrl">
+      <button class="zoom-btn" onclick="zoomBy(1.3)" title="Acercar">+</button>
+      <button class="zoom-btn" onclick="zoomFit()" title="Ajustar todo">⊡</button>
+      <button class="zoom-btn" onclick="zoomBy(0.77)" title="Alejar">−</button>
+    </div>
+  </div>
+
+  <!-- RESULTS RESIZE HANDLE -->
+  <div class="results-resize" id="results-resize" style="grid-column:2/3;grid-row:2/3;position:absolute"></div>
+
+  <!-- RESULTS PANEL -->
+  <div class="results-area" id="results-area">
+    <div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+      <div class="res-tabs">
+        <button class="res-tab active" onclick="showResPane('kpis')" id="rtab-kpis">Resumen</button>
+        <button class="res-tab"        onclick="showResPane('nodes-res')" id="rtab-nodes-res">Nodos</button>
+        <button class="res-tab"        onclick="showResPane('arcs-res')"  id="rtab-arcs-res">Arcos</button>
+        <button class="res-tab"        onclick="showResPane('chart')"    id="rtab-chart">Curvas</button>
+        <button class="res-tab"        onclick="showResPane('bom')"      id="rtab-bom">BOM</button>
+        <button class="res-tab"        onclick="showResPane('ariete')"   id="rtab-ariete">⚡ Ariete</button>
+      </div>
+      <div class="res-panes">
+        <div class="res-pane active" id="rpane-kpis">
+          <div class="kpi-strip" id="kpi-strip">
+            <div class="kpi"><div class="kpi-lbl">Estado</div><div class="kpi-val" id="kpi-status" style="font-size:11px">—</div></div>
+            <div class="kpi"><div class="kpi-lbl">Nodos</div><div class="kpi-val" id="kpi-nodes">—</div></div>
+            <div class="kpi"><div class="kpi-lbl">Arcos</div><div class="kpi-val" id="kpi-arcs">—</div></div>
+            <div class="kpi"><div class="kpi-lbl">Q total</div><div class="kpi-val" id="kpi-qtot">—</div><div class="kpi-sub" id="kpi-qtot-sub"></div></div>
+            <div class="kpi"><div class="kpi-lbl">H mín red</div><div class="kpi-val" id="kpi-hmin">—</div><div class="kpi-sub" id="kpi-hmin-sub"></div></div>
+            <div class="kpi"><div class="kpi-lbl">H máx red</div><div class="kpi-val" id="kpi-hmax">—</div></div>
+            <div class="kpi"><div class="kpi-lbl">V máx</div><div class="kpi-val" id="kpi-vmax">—</div></div>
+          </div>
+          <div id="q-req-check" style="margin-bottom:6px"></div>
+          <div id="kpi-notes"></div>
+        </div>
+        <div class="res-pane" id="rpane-nodes-res">
+          <table class="res" id="nodes-res-table">
+            <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th class="num">Cota [m]</th><th class="num">H [m]</th><th class="num">P [bar]</th><th class="num">Demanda [m³/h]</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="res-pane" id="rpane-arcs-res">
+          <table class="res" id="arcs-res-table">
+            <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>De → A</th><th class="num">Q [m³/h]</th><th class="num">V [m/s]</th><th class="num">ΔH [m]</th><th class="num">Re</th><th>Régimen</th><th class="num">P hid [kW]</th><th class="num">P eje [kW]</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="res-pane" id="rpane-chart">
+          <div id="chart-tabs-bar"></div>
+          <div style="display:flex;gap:12px;flex:1;min-height:0;overflow:hidden">
+            <div style="flex:1;display:flex;flex-direction:column;min-height:0"><div class="chart-wrap"><canvas id="hq-chart"></canvas></div></div>
+          </div>
+        </div>
+        <div class="res-pane" id="rpane-bom">
+          <div id="bom-content" style="padding-bottom:20px"></div>
+        </div>
+        <div class="res-pane" id="rpane-ariete">
+          <div id="ariete-content" style="padding-bottom:20px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main-layout -->
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-title" id="modal-title">Título</div>
+    <div id="modal-body"></div>
+    <div class="modal-footer">
+      <button class="modal-btn" onclick="closeModal()">Cancelar</button>
+      <button class="modal-btn primary" id="modal-ok" onclick="modalOK()">Aceptar</button>
+    </div>
+  </div>
+</div>
+
+<noscript><p class="sinjs">Hydra necesita JavaScript para funcionar. Activalo en tu navegador y recargá la página.</p></noscript>
+
+<!-- Orden de carga = orden de dependencia (index.html es la única lista: los tests la leen de acá).
+     guarda primero (avisa si algo no carga), después libs de exportación, datos, motor de cálculo, estado, interfaz, entrada/salida y arranque. -->
+<script src="js/guarda.js"></script>
+<script src="libs/jspdf.umd.min.js"></script>
+<script src="libs/jspdf.plugin.autotable.min.js"></script>
+<script src="libs/xlsx.full.min.js"></script>
+<script src="js/datos/constantes.js"></script>
+<script src="js/datos/agua.js"></script>
+<script src="js/datos/tuberias.js"></script>
+<script src="js/datos/accesorios.js"></script>
+<script src="js/nucleo/utilidades.js"></script>
+<script src="js/nucleo/fluido.js"></script>
+<script src="js/nucleo/accesorios.js"></script>
+<script src="js/nucleo/hidraulica.js"></script>
+<script src="js/nucleo/bombas.js"></script>
+<script src="js/nucleo/algebra.js"></script>
+<script src="js/nucleo/solver.js"></script>
+<script src="js/nucleo/curva_sistema.js"></script>
+<script src="js/nucleo/ariete.js"></script>
+<script src="js/nucleo/resultados.js"></script>
+<script src="js/nucleo/modelo.js"></script>
+<script src="js/estado.js"></script>
+<script src="js/ui/colores.js"></script>
+<script src="js/ui/historial.js"></script>
+<script src="js/ui/lienzo.js"></script>
+<script src="js/ui/fluido.js"></script>
+<script src="js/ui/propiedades.js"></script>
+<script src="js/ui/paneles.js"></script>
+<script src="js/ui/resultados.js"></script>
+<script src="js/ui/grafico_hq.js"></script>
+<script src="js/ui/calculo.js"></script>
+<script src="js/ui/eventos.js"></script>
+<script src="js/ui/inicio.js"></script>
+<script src="js/io/pdf.js"></script>
+<script src="js/io/excel.js"></script>
+<script src="js/io/svg.js"></script>
+<script src="js/io/proyecto.js"></script>
+<script src="js/io/catalogo.js"></script>
+<script src="js/arranque.js"></script>
+</body>
+</html>

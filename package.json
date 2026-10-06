@@ -1,0 +1,14 @@
+{
+  "name": "hydra",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hydra: calculadora de redes hidráulicas (Newton-Raphson, Colebrook-White, bombas, ariete) con editor en pantalla. Sitio estático.",
+  "scripts": {
+    "test": "node tests/correr_todo.js",
+    "test:pantalla": "node tests/correr_todo.js --e2e",
+    "test:equivalencia": "node tests/correr_todo.js --equivalencia",
+    "test:todo": "node tests/correr_todo.js --todo"
+  },
+  "engines": { "node": ">=18" },
+  "devDependencies": { "playwright": "^1.56.0" }
+}
