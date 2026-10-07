@@ -1,16 +1,17 @@
 {
   "proyecto": "hydra",
-  "version": "1.0.0",
-  "version_aplicacion": "v25",
+  "version": "1.1.0",
+  "version_aplicacion": "v26",
   "fecha": "2026-10-06",
   "archivo_principal": "index.html",
   "ultima_version_archivada": "versiones/hydra_v25.html",
   "verificacion": {
-    "unitarias_motor": "56 OK",
-    "contraste_python": "62 redes comparadas OK (turbulentas: carga <= 1.1e-7 m, caudal relativo <= 2.1e-7)",
-    "pantalla_e2e": "23 OK",
-    "equivalencia_motor_v25": "150 redes, 945 comparaciones exactas, 0 diferencias",
-    "equivalencia_pantalla_v25": "106 pasos, 749 comparaciones, 0 diferencias (7 capturas identicas)",
+    "unitarias_motor": "69 OK",
+    "contraste_python": "74 redes comparadas OK (turbulentas: carga <= 1.04e-8 m, caudal relativo <= 2.75e-9; transicion y laminar <= 1.25e-9 m)",
+    "pantalla_e2e": "24 OK",
+    "equivalencia_motor_v25": "150 redes: 429 comparaciones exactas y 2927 de pipeCalc sin diferencias; solver con tolerancia fina: 59 comparadas (<= 4.2e-7 m), 34 que solo resuelve el motor nuevo, 0 que v25 resolvia y el nuevo no",
+    "equivalencia_pantalla_v25": "106 pasos, 749 comparaciones, 0 diferencias (numeros enmascarados; 2 capturas identicas y 5 con cifras distintas, <= 0.69 % de pixeles)",
+    "robustez_ui_por_defecto": "300 redes aleatorias (tol 1e-4, 100 iter): v26 resuelve 198, v25 144; la unica que v25 daba por resuelta y v26 no tiene una bomba a contraflujo (error explicito)",
     "xss": "etiquetas, ids, fluido, proyecto y catalogo hostiles: se muestran como texto; v25 los ejecutaba"
   },
   "tareas": [
@@ -31,7 +32,7 @@
     },
     {
       "id": 4,
-      "titulo": "Pruebas: unitarias, contraste con Python, pantalla, equivalencia con v25 (motor y pantalla)",
+      "titulo": "Pruebas: unitarias, contraste con Python, pantalla, comparacion con v25 (motor y pantalla)",
       "estado": "hecha"
     },
     {
@@ -41,23 +42,28 @@
     },
     {
       "id": 6,
-      "titulo": "Subir el repositorio a GitHub y activar Pages",
+      "titulo": "Subir el repositorio a GitHub y activar Pages (si la 1.0.0 ya esta subida, reemplazar su contenido por la 1.1.0)",
       "estado": "pendiente",
       "detalle": "Lo hace el usuario: ver README, seccion «Publicar en GitHub Pages»."
     },
     {
       "id": 7,
-      "titulo": "Decidir que hallazgos de v25 se corrigen en una v26",
-      "estado": "pendiente",
-      "detalle": "Lista de 10 en README, seccion «Hallazgos de v25 que NO se corrigieron»; cada uno tiene una prueba que falla a proposito si se corrige."
+      "titulo": "Corregir lo que distorsiona los valores (v26): convergencia relativa, friccion continua, laminar exacto, rugosidad 0, diametros SCH 40, modulo de Young por material, retencion, nodos sin salida, bombas",
+      "estado": "hecha"
     },
     {
       "id": 8,
-      "titulo": "Cotejar constantes de criterio (curvas K-apertura, K de accesorios, espesor, modulo del agua) con normas o catalogos",
-      "estado": "pendiente"
+      "titulo": "Elegir la referencia de las curvas K-apertura de compuerta y esfera (hoy muy distintas de los valores publicados)",
+      "estado": "pendiente",
+      "detalle": "Decision del usuario: README, «Hallazgos que siguen sin corregirse», punto 1 (tabla publicado vs Hydra)."
     },
     {
       "id": 9,
+      "titulo": "Cotejar el resto de las constantes de criterio (K de accesorios, espesor por defecto, modulo del agua, modulo de la fundicion gris, velocidad de referencia del equipo)",
+      "estado": "pendiente"
+    },
+    {
+      "id": 10,
       "titulo": "Definir la licencia del codigo propio",
       "estado": "pendiente"
     }

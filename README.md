@@ -4,7 +4,7 @@ Editor en pantalla y solver de redes de tuberías: tanques, nodos con demanda, t
 
 Es un **sitio estático**: no hay servidor, ni compilación, ni internet en uso (las librerías y tipografías están en `libs/`). Se puede abrir con doble clic en `index.html` o publicar tal cual en GitHub Pages.
 
-Versión de la aplicación: **v25** (la del archivo único original). Versión del repositorio: **1.0.0** (reorganización y endurecimiento; los cálculos no cambian, ver «Cambios respecto de v25»).
+Versión de la aplicación: **v26**. Versión del repositorio: **1.1.0**. La 1.0.0 fue la v25 pasada a sitio estático sin tocar ningún cálculo; la 1.1.0 corrige el motor para que los valores sean realistas (ver «Cambios de cálculo en v26»).
 
 ## Estructura
 
@@ -14,15 +14,15 @@ css/estilos.css       estilos
 js/
   guarda.js           primer script: avisa en pantalla si falta un archivo, una librería o los estilos, o si algo falla al arrancar
   datos/              constantes y tablas: gravedad, agua (ρ, ν por temperatura), diámetros y rugosidades, accesorios y curvas K-apertura
-  nucleo/             MOTOR DE CÁLCULO, sin DOM ni estado global: fricción, accesorios, bombas, álgebra, solver, curva del sistema, ariete,
-                      aplicación de resultados y validación de archivos importados
+  nucleo/             MOTOR DE CÁLCULO, sin DOM ni estado global: fricción, accesorios, materiales, bombas, álgebra, solver, curva del sistema,
+                      ariete, aplicación de resultados y validación de archivos importados
   estado.js           estado de la aplicación (red, fluido, deshacer/rehacer) y fábricas de nodos y arcos
   ui/                 pantalla: lienzo SVG, propiedades, listas, resultados, gráfico H-Q, botón Calcular, eventos
   io/                 exportar PDF / Excel / PNG, guardar y abrir proyecto, catálogo de bombas
   arranque.js         último script: red de ejemplo y marca «lista»
 libs/                 jsPDF, jsPDF-AutoTable, SheetJS y tipografías IBM Plex (con licencias y huellas en libs/VERSIONES.md)
-versiones/            hydra_v25.html: el archivo único original, sin tocar
-tests/                unitarias, contraste con Python, prueba de pantalla y equivalencia con v25
+versiones/            hydra_v25.html: el archivo único original, sin tocar (la v26 es `index.html` con `js/` y `css/`)
+tests/                unitarias, contraste con Python, prueba de pantalla y comparación con v25
 ```
 
 **Por qué scripts clásicos y no módulos.** Los scripts se cargan en orden y comparten el mismo ámbito global (`const`, `let` y `function` de nivel superior se ven entre archivos), igual que en el archivo único. Por eso los `onclick="..."` del HTML siguen funcionando y el sitio abre con doble clic (`file://`), donde los módulos ES no cargan. A cambio, **el orden de `index.html` importa**: cada archivo solo puede usar en el momento de la carga lo que definieron los anteriores (dentro de las funciones, que corren después, no hay restricción).
@@ -44,14 +44,14 @@ tests/                unitarias, contraste con Python, prueba de pantalla y equi
 
 `.nojekyll` evita que GitHub procese el sitio con Jekyll (ignoraría carpetas que empiezan con guion bajo y retrasaría la publicación).
 
-**Versiones nuevas.** Antes de cambiar la aplicación, copiá el estado actual a `versiones/` con su número y marcá el commit con una etiqueta (`git tag v26`). El archivo principal conserva su nombre (`index.html`).
+**Versiones nuevas.** Antes de cambiar la aplicación, copiá el estado actual a `versiones/` con su número y marcá el commit con una etiqueta (`git tag v27`). El archivo principal conserva su nombre (`index.html`).
 
 ## Verificación
 
 ```
 node tests/correr_todo.js                 unitarias del motor + contraste con Python
 node tests/correr_todo.js --e2e           + prueba de pantalla (Chromium)
-node tests/correr_todo.js --equivalencia  + equivalencia con v25 (motor y pantalla)
+node tests/correr_todo.js --equivalencia  + comparación con v25 (motor y pantalla)
 node tests/correr_todo.js --todo          todo (varios minutos)
 ```
 
@@ -59,17 +59,39 @@ Requisitos: Node 18 o más; para la pantalla, `npm install` (instala Playwright;
 
 | Prueba | Qué comprueba | Resultado |
 |---|---|---|
-| `tests/unit/test_nucleo.js` | Motor sin pantalla (carga en un contexto vacío): utilidades, propiedades del agua, Colebrook y Hagen-Poiseuille, accesorios, bombas, álgebra, golpe de ariete, solver contra soluciones analíticas (bisección), entradas inválidas y 40 redes aleatorias con balance de masa | 56 correctas, 0 con error |
-| `tests/ref/` (`gen_casos.js` + `ref.py`) | 68 redes (62 las resuelve el motor) contra una implementación independiente en Python (numpy/scipy, tablas reescritas aparte): el residuo de las ecuaciones independientes y la solución obtenida desde cero | 62 comparadas. Turbulentas: carga ≤ 1,1e-7 m, caudal ≤ 2,1e-7 (relativo). Laminar/transición (3): carga ≤ 1,4e-9 m |
-| `tests/e2e/pantalla.js` | Carga limpia por http y por `file://` sin pedir nada a internet; aviso de carga con el sitio roto a propósito; archivos de proyecto y catálogo hostiles (contra v25); textos extremos; exportar PDF y Excel | 23 correctas, 0 con error |
-| `tests/equivalencia/motor.js` | 150 redes aleatorias (semilla fija) resueltas por v25 y por el repo, con todos los resultados comparados de forma exacta | 945 comparaciones, 0 diferencias (15 redes se descartan por tardar más de 2 s en v25) |
-| `tests/equivalencia/pantalla.js` | Recorrido de 106 pasos en v25 y en el repo: HTML, campos, estado interno, cada `<canvas>`, diálogos, archivos descargados y 7 capturas de pantalla | 749 comparaciones, 0 diferencias; JSON, Excel y PDF idénticos; 7 capturas idénticas byte a byte |
+| `tests/unit/test_nucleo.js` | Motor sin pantalla (carga en un contexto vacío): utilidades, propiedades del agua, fricción (laminar, transición, Colebrook), accesorios, materiales, bombas, álgebra, golpe de ariete, solver contra soluciones analíticas (bisección), entradas inválidas, nodos sin salida, bombas sin caudal o con caudal inverso y 40 redes aleatorias con balance de masa | 69 correctas, 0 con error |
+| `tests/ref/` (`gen_casos.js` + `ref.py`) | 75 redes (a mano y aleatorias; 74 las resuelve el motor, la otra da el error explícito de bomba con caudal inverso) contra una implementación independiente en Python (numpy/scipy, tablas reescritas aparte): residuo de las ecuaciones independientes en la solución del motor y solución obtenida desde cero | 74 comparadas. Turbulentas: carga ≤ 1,04e-8 m, caudal ≤ 2,75e-9 (relativo). Transición (6): carga ≤ 1,25e-9 m. Laminares (7): carga ≤ 1,73e-10 m |
+| `tests/e2e/pantalla.js` | Carga limpia por http y por `file://` sin pedir nada a internet; aviso de carga con el sitio roto a propósito; archivos de proyecto y catálogo hostiles (contra v25); textos extremos; exportar PDF y Excel; material, diámetro nominal y resultados (v26) | 24 correctas, 0 con error |
+| `tests/equivalencia/motor.js` | 150 redes aleatorias (semilla fija) en v25 y en el repo, en tres niveles: **exacto** en lo que la v26 no tocó (K de accesorios, bombas, agua, ariete), **con tolerancia** en el solver (tolerancia 1e-9 en las dos) y `pipeCalc()` suelto en turbulento | 429 comparaciones exactas y 2.927 de `pipeCalc()`, 0 diferencias; solver: 59 redes comparadas (peor diferencia 4,2e-7 m de carga y 1,9e-7 relativo de caudal), 9 con tramos Re < 4000 aparte, 34 redes que ahora resuelve el motor nuevo y v25 no, 0 que v25 resolvía y el nuevo no (7 redes se descartan por tardar más de 4 s en v25) |
+| `tests/equivalencia/pantalla.js` | Recorrido de 106 pasos en v25 y en el repo con **todo número enmascarado**: estructura del HTML, campos, estado, diálogos, archivos descargados y capturas | 749 comparaciones, 0 diferencias; capturas: 2 idénticas byte a byte y 5 con cifras distintas (como mucho 0,69 % de píxeles); consola sin avisos ni errores en ambas |
 
-La equivalencia con v25 corre el mismo caso en las dos versiones y compara de forma **exacta** (cada número, incluidos NaN, Infinity y −0): el texto original del archivo único contra los archivos de `js/`, ambos en el mismo motor de JavaScript, de modo que un resultado distinto en el último decimal se vería. En la pantalla compara además el HTML completo, el estado interno, cada `<canvas>`, los diálogos y los archivos descargados (JSON, Excel y PDF idénticos byte a byte con reloj y azar fijos). Las capturas se comparan píxel a píxel y solo se tolera un cambio de hasta 8/255 en un canal (el dibujado de las esquinas redondeadas puede variar ±1 entre dos corridas de la misma versión); cualquier otro cambio cuenta como diferencia y lo que quede bajo el umbral se informa.
+**Qué compara la equivalencia con v25 desde la v26.** Hasta la 1.0.0 comparaba de forma exacta cada número; desde la v26 el cálculo cambió a propósito, así que la prueba se partió en dos. *Motor:* en lo que no se tocó (accesorios, bombas, agua, tabla de ariete salvo la columna nueva «Material») sigue siendo comparación exacta, y el solver se compara con una tolerancia fina en el dominio donde v25 era correcto; quedan fuera, y se cuentan aparte, las redes con tramos laminares o de transición (la ley de fricción cambió) y los caudales que v25 informaba mal en retenciones contra la corriente. También se exige que el motor nuevo resuelva **todo lo que resolvía v25** (y se cuenta lo que ahora resuelve de más). *Pantalla:* se enmascaran los números y se comparan las estructuras; las diferencias esperadas (material en el panel, columna «Material», diámetros SCH 40, etc.) están listadas una por una en el propio test con su motivo, y cualquier otra cuenta como diferencia. Las capturas se comparan píxel a píxel con un umbral de 5 % de píxeles distintos (el contenido numérico cambia).
 
-## Cambios respecto de v25
+## Cambios de cálculo en v26
 
-El cálculo y la pantalla son equivalentes (ver arriba). Lo que cambió, a propósito:
+Pedido: que los valores sean realistas. Cada cambio tiene su prueba en `tests/unit/test_nucleo.js` y el resultado completo se contrasta con la implementación independiente en Python. Lo que v25 distorsionaba, de mayor a menor efecto sobre los números:
+
+1. **Criterio de convergencia.** v25 se detenía cuando el residuo de cada nodo era menor que la tolerancia **en m³/s absolutos**; con la tolerancia por defecto (1e-4 m³/s = 0,36 m³/h) los caudales chicos quedaban con errores del 10–20 % (dos tramos en serie daban 0,09 y 0,21 m³/h; un nodo sin salida recibía 0,35 m³/h «fantasma»). Ahora el error de cada nodo es **relativo** al caudal que circula por él (`|F| / (Σ|Q| + 1e-8 m³/s)`). En la red de ejemplo la carga en J1 pasa de 9,756 m (v25) a 9,761 m.
+2. **Fricción continua.** v25 pasaba de 64/Re a Colebrook de golpe en Re = 2300 (con ε/D = 0,0005, f saltaba de 0,0278 a 0,0477, un 72 % más) y entre 2300 y 4000 el caudal podía no tener solución única. Ahora: 64/Re hasta 2300, interpolación lineal en Re entre 64/2300 y Colebrook(4000) en la zona de transición, y Colebrook-White desde 4000. *La zona de transición no tiene una ley única: la interpolación es una convención para que el resultado sea continuo y único, no una medición.*
+3. **Flujo laminar exacto.** v25 iteraba 12 veces la fricción (≈ 0,1 % de error respecto de Hagen-Poiseuille) y usaba en el Jacobiano la conductancia turbulenta (`Q/2ΔH`), por lo que con fluidos viscosos (≥ 100 cSt) Newton oscilaba y no convergía. Ahora el caudal laminar sale de la fórmula cerrada (`hf = b·V + a·V²`) y el Jacobiano usa la derivada exacta en laminar y transición.
+4. **Rugosidad ε = 0 respetada.** v25 tomaba un 0 (tubo liso) como «falta el dato» y usaba acero (0,046 mm). Ahora un 0 explícito es un tubo liso; el valor por defecto solo se usa cuando el tramo no trae rugosidad. Una rugosidad o un sarro negativos se toman como 0.
+5. **Diámetros interiores SCH 40.** v25 tenía mal DN350, DN400, DN450 y DN600 (DN400: 428 mm de interior, más que su diámetro exterior; correcto: 381 mm). Se rehicieron con los diámetros exteriores de ASME B36.10M (D = OD − 2·t; fuente: archtoolbox.com, tabla ASME B36.10M). El espesor de pared ahora sigue al diámetro nominal elegido.
+6. **Material y golpe de ariete.** v25 buscaba el módulo de Young con una clave que no existía en la tabla, así que todo material usaba 200 GPa (acero): en PVC o HDPE la celeridad y la sobrepresión salían muy sobreestimadas. Ahora cada material trae su módulo (acero 200 GPa, fundición gris 170, cobre 120, PVC 3, HDPE 0,8) y **PVC y HDPE son dos materiales** (v25 los juntaba con módulos 4 veces distintos). El material se guarda en el tramo; un proyecto de v25 (sin material) lo deduce de la rugosidad y, si no se puede saber cuál es, usa acero (del lado conservador). Aparece en el panel, la lista de materiales, el PDF, el Excel y la tabla de ariete.
+7. **Retención contra la corriente.** El solver ya la bloqueaba, pero v25 informaba en la tabla el caudal inverso que habría sin retención (hasta −90 m³/h) y el balance de masa no cerraba. Ahora informa 0.
+
+Redes que v25 no resolvía o resolvía mal:
+
+- **Nodos sin salida** (una derivación tapada, una retención cerrada, una bomba que alimenta un nodo sin consumo): v25 declaraba «Sistema singular» porque la conductancia de un tramo sin diferencia de carga valía 0. Ahora vale su límite laminar (o un piso chico si no hay fricción) y una retención cerrada sigue teniendo una conductancia mínima para el Jacobiano (el caudal informado es 0).
+- **Búsqueda de línea más exigente:** el paso de Newton se acepta solo si el residuo baja un 10 % (v25 aceptaba cualquier mejora, por mínima que fuera). Elimina los ciclos de dos iteraciones con tramos muy estrangulados y el caudal fantasma hacia nodos sin salida.
+- **Bombas:** la pendiente de la curva de bomba (`pumpHeadDeriv`) daba ~20 veces menos de lo real con caudales menores a 0,5 m³/h (la diferencia central cruzaba el cero), y el Jacobiano ignoraba el signo del caudal (la carga usa |Q|). Con una bomba cerrada contra una retención, Newton no cerraba. Además, una **bomba que no alcanza a vencer al tanque de salida** admite una solución matemática con el agua atravesando la bomba al revés; ahora el solver lo informa como error («Caudal inverso en la bomba …: agregá una retención en serie») en vez de mostrar esos caudales.
+- **Curva del sistema:** ya no se vacía por un nodo aislado (sin ningún tramo) en la red.
+- **Rugosidad, sarro o longitud negativos:** el panel los rechaza (vuelve al valor anterior; una longitud negativa bloqueaba el tramo en silencio), al abrir un proyecto se corrigen (rugosidad → valor por defecto, sarro → 0) y el motor los toma como 0.
+
+Efecto medido sobre redes aleatorias (300 redes, configuración por defecto de la pantalla: tolerancia 1e-4 y 100 iteraciones): **el motor nuevo resuelve 198 y v25 144** (55 solo el nuevo; 143 las dos). La única red que v25 daba por resuelta y el motor nuevo no es una con una bomba a contraflujo: v25 informaba −238 m³/h por la bomba como resultado válido y ahora es el error explícito. Las otras 101 no las resuelve ninguna de las dos (el generador arma redes extremas a propósito).
+
+## Cambios de la 1.0.0 (seguridad, sitio y carga)
+
+En la 1.0.0 el cálculo no cambió (la equivalencia con v25 era exacta). Lo que cambió, a propósito:
 
 **Seguridad y validación de datos externos**
 
@@ -86,20 +108,31 @@ El cálculo y la pantalla son equivalentes (ver arriba). Lo que cambió, a prop�
 - `js/guarda.js` avisa en pantalla si falta un script, una librería o la hoja de estilos, o si algo falla al arrancar (en v25, un archivo faltante dejaba una página a medias sin decir nada). Si solo faltan librerías de exportación, el aviso es ámbar, va abajo y se puede ocultar; exportar muestra un mensaje que lo explica.
 - Mensaje dentro de la página si el navegador tiene JavaScript desactivado.
 
-## Hallazgos de v25 que NO se corrigieron
+## Hallazgos que siguen sin corregirse
 
-Se dejan como estaban para que los resultados sigan siendo los de v25; cada uno tiene un test que **falla a propósito** si algún día se corrige (para que lo actualices). Para decidir con criterio de ingeniería, no de código:
+Los cinco primeros hallazgos de v25 (retención, módulo de Young, fluidos viscosos, fricción en transición y dependencia de la tolerancia) se corrigieron en la v26 (ver arriba). Quedan estos; para decidir con criterio de ingeniería, no de código:
 
-1. **Retención como «elemento válvula» contra la corriente.** El solver la bloquea (caudal 0) pero la tabla de resultados informa el caudal inverso que habría sin retención (hasta −90 m³/h en un caso de prueba), así que el balance de masa que se ve en los nodos no cierra. El tipo antiguo `check` sí se recorta a cero. Reproducir: tanque A (30 m) → junta J → válvula «Retención» → tanque B (50 m).
-2. **Golpe de ariete: módulo de Young.** El material se busca en `E_YOUNG` con una clave (`'Acero carbono'`, `'PVC / HDPE'`, …) que no existe en esa tabla (`'Acero'`, `'PVC'`, …), así que **todo material usa 200 GPa (acero)**. Para PVC/HDPE la celeridad de onda y la sobrepresión salen sobreestimadas (del lado conservador en ΔP, pero no es el valor real).
-3. **Fluidos muy viscosos en régimen laminar no convergen** (≈100 cSt o más con tubería chica). El Jacobiano usa la conductancia del régimen turbulento (Q/2ΔH); en laminar la pendiente real es Q/ΔH y Newton oscila. El solver lo informa («No convergió»), no da un resultado falso.
-4. **Fricción en la zona de transición.** Por debajo de Re 2300 usa 64/Re y por encima Colebrook, sin interpolar: entre Re 2300 y 4000 el caudal puede no tener una solución única. Además, `pipeCalc` itera 12 veces la fricción: en flujo muy laminar queda a ~0,1 % de la solución cerrada (Hagen-Poiseuille). En turbulento coincide con Colebrook resuelto aparte a 1e-7.
-5. **Resultados que dependen de la tolerancia elegida.** Los datos se muestran con la tolerancia que elegiste («Normal» 1e-4 por defecto); para informes, usá «Alta (1e-6)».
-6. **El solver no tiene límite de tiempo.** En redes difíciles puede tardar varios segundos (hasta 4,4 s en las pruebas) y la pantalla queda bloqueada mientras calcula.
-7. **El catálogo de bombas no se conecta con las bombas de la red:** es un almacén de curvas (guardar, buscar, exportar, importar); para usar una hay que copiar sus puntos al campo de curva de la bomba.
-8. **Código que no se usa:** `exportPNG` (`js/io/svg.js`), el diálogo genérico `#modal` (sus botones llaman a `closeModal`/`modalOK`, que no existen), y los botones de modo tienen el manejador dos veces (inline y `addEventListener`), de modo que `setMode` corre dos veces por clic (inocuo).
-9. **Los `onclick="..."` en línea impiden una política de seguridad estricta** (`Content-Security-Policy` con `script-src 'self'`). Para endurecer más habría que pasarlos a `addEventListener`.
-10. **Constantes de criterio por cotejar con normas o catálogos:** curvas K-apertura de válvulas (orientativas, «no son datos de un fabricante»), K de accesorios, espesor por defecto 6 % del diámetro (≈ Sch40/SDR17), módulo de elasticidad del agua 2,1 GPa, velocidad de referencia de 2 m/s del modelo de equipo.
+1. **Curvas K-apertura de las válvulas de compuerta y de esfera, por cotejar.** Son «orientativas» (así lo dice el código) y difieren mucho de los valores publicados. Referencia usada para comparar: la tabla de coeficientes de pérdidas menores de [Engineering ToolBox](https://engineeringtoolbox.com/minor-loss-coefficients-pipes-d_626.html) (valores de texto de mecánica de fluidos), con la apertura como 100 % − fracción cerrada:
+
+   | Válvula y apertura | Publicado (K) | Hydra (K) | Relación |
+   |---|---|---|---|
+   | Compuerta 100 % | 0,15 | 0,20 | ×1,3 |
+   | Compuerta 75 % | 0,26 | 2 | ×8 |
+   | Compuerta 50 % | 2,1 | 17 | ×8 |
+   | Compuerta 25 % | 17 | 185 | ×11 |
+   | Esfera 100 % | 0,05 | 0,05 | igual |
+   | Esfera 67 % | 5,5 | 0,31 | ÷18 |
+   | Esfera 33 % | 200 | 10,5 | ÷19 |
+   | Globo 100 % | 10 | 10 | igual |
+
+   La compuerta estrangulada pierde de más y la esfera estrangulada de menos; abiertas del todo coinciden. **No se cambiaron**: son datos de un criterio (qué referencia o curva de fabricante adoptar), no un error de cálculo. Mariposa 100 % (0,35) es un valor de válvulas grandes; en DN100 ronda 0,8. Con una válvula parcialmente cerrada conviene cargar el K de catálogo del fabricante en «K adicional».
+2. **Redes con diferencias de carga muy chicas** (menos de unos 5 cm entre tanques): Newton oscila desde la semilla inicial y el solver informa «No convergió» (falla a la vista, no un resultado falso). Pasaba igual en v25.
+3. **El modelo de bomba usa |Q|.** La carga de una bomba se calcula con el caudal absoluto; una bomba que no puede vencer el desnivel se informa como error (ver arriba) y no se modela su comportamiento como turbina o con fuga inversa. Para bloquear el retorno, poné una retención en serie.
+4. **El solver no tiene límite de tiempo.** En redes difíciles puede tardar varios segundos (hasta 4,4 s en las pruebas) y la pantalla queda bloqueada mientras calcula.
+5. **El catálogo de bombas no se conecta con las bombas de la red:** es un almacén de curvas (guardar, buscar, exportar, importar); para usar una hay que copiar sus puntos al campo de curva de la bomba.
+6. **Código que no se usa:** `exportPNG` (`js/io/svg.js`), el diálogo genérico `#modal` (sus botones llaman a `closeModal`/`modalOK`, que no existen), y los botones de modo tienen el manejador dos veces (inline y `addEventListener`), de modo que `setMode` corre dos veces por clic (inocuo).
+7. **Los `onclick="..."` en línea impiden una política de seguridad estricta** (`Content-Security-Policy` con `script-src 'self'`). Para endurecer más habría que pasarlos a `addEventListener`.
+8. **Otras constantes de criterio por cotejar:** K de accesorios, espesor por defecto 6 % del diámetro (≈ Sch40/SDR17) cuando no se elige diámetro nominal, módulo de elasticidad del agua 2,1 GPa, módulo de la fundición gris 170 GPa (extremo alto del rango 100–170), velocidad de referencia de 2 m/s del modelo de equipo.
 
 ## Licencias de terceros
 

@@ -1,0 +1,5 @@
+node_modules/
+tests/ref/casos.json
+tests/equivalencia/salida/
+__pycache__/
+*.pyc

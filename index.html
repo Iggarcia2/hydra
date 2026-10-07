@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Hydra v25 — Calculadora de Redes Hidráulicas</title>
+<title>Hydra — Calculadora de Redes Hidráulicas</title>
 <link rel="stylesheet" href="libs/fuentes/fuentes.css">
 <link rel="stylesheet" href="css/estilos.css">
 </head>
@@ -59,7 +59,7 @@
     <button class="tb-btn" id="btn-iso" onclick="toggleIsoView()" title="Vista Isométrica">🧊 3D</button>
     <button class="tb-btn violet" onclick="openCatalogModal()" title="Catálogo de bombas">⛯ Catálogo</button>
     <button class="tb-btn" onclick="openProjectModal()" title="Datos del proyecto">🗒 Proyecto</button>
-    <div class="tb-badge">v25</div>
+    <div class="tb-badge" id="tb-version"></div>
   </div>
 </div>
 
@@ -371,6 +371,7 @@
 <script src="js/nucleo/algebra.js"></script>
 <script src="js/nucleo/solver.js"></script>
 <script src="js/nucleo/curva_sistema.js"></script>
+<script src="js/nucleo/materiales.js"></script>
 <script src="js/nucleo/ariete.js"></script>
 <script src="js/nucleo/resultados.js"></script>
 <script src="js/nucleo/modelo.js"></script>
