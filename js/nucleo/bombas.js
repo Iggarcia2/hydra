@@ -26,9 +26,13 @@ function pumpHead(Q_m3h, arc) {
   }
   return 0;
 }
+// Pendiente de la curva [m por m³/h] respecto del caudal absoluto, por diferencia central de ±0,5 m³/h. [v26] El punto central nunca baja de
+// 0,5 m³/h: pumpHead usa |Q|, así que con Q < 0,5 los dos puntos quedaban a ambos lados del cero y la diferencia daba una pendiente
+// mucho menor que la real (con una curva de 0,066 m por m³/h, 0,0034 a Q = 0,03). Newton usaba esa pendiente para la bomba que alimenta un
+// nodo sin salida (caudal 0): el paso se pasaba de largo y el solver no convergía.
 function pumpHeadDeriv(Q_m3h, arc) {
-  const dQ=0.5;
-  return (pumpHead(Q_m3h+dQ,arc)-pumpHead(Q_m3h-dQ,arc))/(2*dQ);
+  const dQ = 0.5, Qc = Math.max(Math.abs(Q_m3h), dQ);
+  return (pumpHead(Qc+dQ,arc)-pumpHead(Qc-dQ,arc))/(2*dQ);
 }
 // Max Q where pump can deliver (Q at H=0)
 function pumpMaxQ(arc) {

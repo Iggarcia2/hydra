@@ -127,7 +127,7 @@ function exportPDF() {
   if (projectMeta.client)   doc.text(`Cliente: ${projectMeta.client}`, W/2+10, 19);
   if (projectMeta.engineer) doc.text(`Ingeniero: ${projectMeta.engineer}`, W/2+10, 27);
   doc.setFontSize(7); doc.setTextColor(120,138,156);
-  doc.text('HYDRA v25', W-margin, 8, {align:'right'});
+  doc.text('HYDRA ' + VERSION_APP, W-margin, 8, {align:'right'});
 
   y = 42;
 
@@ -350,19 +350,19 @@ function exportPDF() {
     doc.text('6. LISTA DE MATERIALES — TUBERÍAS', margin, y); y += 4; hr();
     const pipeGroups2 = {};
     pipes.forEach(a => {
-      const key = `D${a.D_mm}_e${a.eps_mm}`;
-      if (!pipeGroups2[key]) pipeGroups2[key] = { D_mm: a.D_mm, eps_mm: a.eps_mm, totalL: 0, count: 0 };
+      const mat = etiquetaMaterial(a);   // [v26] PVC, HDPE y cobre comparten rugosidad: se agrupa y se rotula por material
+      const key = `D${a.D_mm}_e${a.eps_mm}_${mat}`;
+      if (!pipeGroups2[key]) pipeGroups2[key] = { D_mm: a.D_mm, eps_mm: a.eps_mm, mat, totalL: 0, count: 0 };
       pipeGroups2[key].totalL += a.L_m || 0;
       pipeGroups2[key].count++;
     });
-    const matLbl = eps => MATERIALS.find(m=>Math.abs(m.eps-eps)<1e-5)?.label || `rugosidad ${eps}`;
     doc.autoTable({
       startY: y,
       margin: { left: margin, right: margin },
       styles: { fontSize: 7.5, cellPadding: 1.5, font: 'helvetica', textColor: ink },
       headStyles: { fillColor: lightFill, textColor: steel, fontStyle: 'bold', lineWidth: 0.1, lineColor: borderGray },
       head: [['Diámetro','Material','ε [mm]','Long. total [m]','N° tramos']],
-      body: Object.values(pipeGroups2).map(g=>[dnLbl(g.D_mm),matLbl(g.eps_mm),g.eps_mm,g.totalL.toFixed(1),g.count]),
+      body: Object.values(pipeGroups2).map(g=>[dnLbl(g.D_mm),g.mat,g.eps_mm,g.totalL.toFixed(1),g.count]),
     });
     y = doc.lastAutoTable.finalY + 6;
   }
@@ -373,7 +373,7 @@ function exportPDF() {
     doc.setPage(i);
     doc.setDrawColor(...borderGray); doc.setLineWidth(0.2); doc.line(margin, H-10, W-margin, H-10);
     doc.setFontSize(7); doc.setTextColor(...gray); doc.setFont('helvetica','normal');
-    doc.text(`Hydra v25  ·  ${projectMeta.name}  ·  ${projectMeta.rev}`, margin, H-6);
+    doc.text(`Hydra ${VERSION_APP}  ·  ${projectMeta.name}  ·  ${projectMeta.rev}`, margin, H-6);
     doc.text(`Página ${i} de ${pageCount}`, W-margin, H-6, {align:'right'});
     doc.text(dateStr, W/2, H-6, {align:'center'});
   }

@@ -10,10 +10,19 @@
 // caudal. Reutiliza pipeCalc/gaussSolve — no toca solveNetwork().
 // x0 (opcional) es una semilla de cabezas para continuar desde el punto anterior del barrido.
 // [repo] red = {nodes, arcs, fluid:{rho, nu}} (antes leía state y fluid globales)
+// [v26] Tolerancia relativa de la curva del sistema (antes: |F| < 1e-4 m³/s absoluto, que en redes de caudal chico dejaba pasar errores de 10–20 %).
+const TOL_CURVA = 1e-6;
+// [v26] Nodos libres con al menos un arco. Un nodo suelto (recién agregado, sin conectar) no interviene en el equilibrio y dejaba una fila nula
+// en el Jacobiano: con la tolerancia absoluta de v25 el barrido arrancaba ya «convergido» en el punto de operación y no se notaba, con la relativa sí.
+function nodosLibresConectados(red) {
+  const usados = new Set();
+  for (const a of red.arcs) { usados.add(a.fromId); usados.add(a.toId); }
+  return red.nodes.filter(n => n.type==='junction' && usados.has(n.id));
+}
 function systemHeadAt(red, pumpArc, Qm3h, x0) {
   const nodes = red.nodes, arcs = red.arcs, fluid = red.fluid;
   const fixedNodes  = nodes.filter(n=>n.type==='tank');
-  const freeNodes   = nodes.filter(n=>n.type==='junction');
+  const freeNodes   = nodosLibresConectados(red);
   const nonPumpArcs = arcs.filter(a=>a.type!=='pump');
   const otherPumps  = arcs.filter(a=>a.type==='pump' && a.id!==pumpArc.id);
   if (!freeNodes.length || !fixedNodes.length) return {H:null, x:null};
@@ -60,19 +69,20 @@ function systemHeadAt(red, pumpArc, Qm3h, x0) {
   function buildF(xv) {
     const F = new Array(NF).fill(0);
     const J = Array.from({length:NF}, () => new Array(NF).fill(0));
+    const circ = new Array(NF).fill(0);   // [v26] caudal que circula por cada nodo (m³/s), para el criterio de convergencia relativo
     for (let i=0; i<NF; i++) {
       const node = freeNodes[i];
       const Hi = xv[i];
       F[i] = -node.demand/3600;
+      circ[i] = Math.abs(node.demand)/3600;
       for (const arc of nonPumpArcs) {
         let dH=0, fromIdx=-1, toIdx=-1, connected=false;
         if (arc.fromId===node.id) { const Hj=getH2(arc.toId,xv); dH=Hi-Hj; connected=true; toIdx=freeIdx[arc.toId]; }
         else if (arc.toId===node.id) { const Hj=getH2(arc.fromId,xv); dH=Hj-Hi; connected=true; fromIdx=freeIdx[arc.fromId]; }
         if (!connected) continue;
         let Q_ms=0, cond=0;
-        if (arc.type==='pipe' || arc.type==='check') {
-          if (arc.type==='check' && dH<0) { Q_ms=0; cond=0; }
-          else { const r=pipeCalc(dH,arc, fluid); Q_ms=r.Q/3600; cond=r.cond/3600; }
+        if (arc.type==='pipe' || arc.type==='check' || arc.type==='valve') {
+          ({Q_ms, cond} = caudalTramo(arc, dH, fluid));   // [v26] misma regla que solveNetwork (retención, prv = tubería abierta)
         } else if (arc.type==='equip') {
           const dpH = Math.max(arc.dp_bar*1e5/(fluid.rho*G), 1e-6);
           const effDH = dH - dpH;
@@ -83,31 +93,29 @@ function systemHeadAt(red, pumpArc, Qm3h, x0) {
           // quiebre del modelo de Equipo, sin cambiar el residuo (Q_ms) ni el punto de equilibrio.
           const effDHforCond = Math.max(effDH, 0.02*dpH);
           cond = (Q_REF*Math.sqrt(effDHforCond/dpH)) / (2*effDHforCond);
-        } else if (arc.type==='valve') {
-          if (arc.valveType==='check' && dH<0) { Q_ms=0; cond=0; }
-          else { const r=pipeCalc(dH,arc, fluid); Q_ms=r.Q/3600; cond=r.cond/3600; }
         }
+        circ[i] += Math.abs(Q_ms);
         if (arc.fromId===node.id) { F[i]-=Q_ms; J[i][i]-=cond; if (toIdx>=0&&toIdx<NF) J[i][toIdx]+=cond; }
         else                      { F[i]+=Q_ms; J[i][i]-=cond; if (fromIdx>=0&&fromIdx<NF) J[i][fromIdx]+=cond; }
       }
       // Bomba en análisis: caudal fijo (no es incógnita en este barrido)
-      if (pumpArc.fromId===node.id) F[i] -= Qfixed_ms;
-      else if (pumpArc.toId===node.id) F[i] += Qfixed_ms;
+      if (pumpArc.fromId===node.id) { F[i] -= Qfixed_ms; circ[i] += Math.abs(Qfixed_ms); }
+      else if (pumpArc.toId===node.id) { F[i] += Qfixed_ms; circ[i] += Math.abs(Qfixed_ms); }
       // Otras bombas de la red (si hay): se fijan en su último caudal ya resuelto
       for (const p of otherPumps) {
         const Qp = otherPumpQ[p.id];
-        if (p.fromId===node.id) F[i] -= Qp;
-        else if (p.toId===node.id) F[i] += Qp;
+        if (p.fromId===node.id) { F[i] -= Qp; circ[i] += Math.abs(Qp); }
+        else if (p.toId===node.id) { F[i] += Qp; circ[i] += Math.abs(Qp); }
       }
     }
-    return {F, J};
+    return {F, J, circ};
   }
 
   let converged = false;
   for (let iter=0; iter<100; iter++) {
-    const {F, J} = buildF(x);
+    const {F, J, circ} = buildF(x);
     const res0 = Math.sqrt(F.reduce((s,v)=>s+v*v,0));
-    if (res0 < 1e-4) { converged = true; break; }
+    if (errorContinuidad(F, circ, NF) < TOL_CURVA) { converged = true; break; }
     const dx = gaussSolve(J, F.map(v=>-v));
     if (!dx) return {H:null, x:null};
     const dmax = dx.reduce((m,v)=>Math.max(m,Math.abs(v)),0);
@@ -116,18 +124,18 @@ function systemHeadAt(red, pumpArc, Qm3h, x0) {
     // de la curva del sistema podía quedar oscilando sin asentarse cerca del quiebre del
     // modelo de Equipo, dejando huecos en el gráfico. En el caso de siempre (paso completo ya
     // mejora el residuo) esto no cambia nada — se acepta en el primer intento, igual que antes.
-    let xTry = x, resTry = res0;
+    let xTry = x, resTry = res0, errTry = Infinity;
     for (let bt=0; bt<12; bt++) {
       const lam = lamBase * Math.pow(0.5, bt);
       const xCand = x.slice();
       for (let i=0; i<NF; i++) xCand[i] += lam*dx[i];
-      const { F: Fcand } = buildF(xCand);
+      const { F: Fcand, circ: circCand } = buildF(xCand);
       const resCand = Math.sqrt(Fcand.reduce((s,v)=>s+v*v,0));
-      if (resCand < resTry || bt === 0) { xTry = xCand; resTry = resCand; }
-      if (resCand < res0) break;
+      if (resCand < resTry || bt === 0) { xTry = xCand; resTry = resCand; errTry = errorContinuidad(Fcand, circCand, NF); }
+      if (resCand <= LS_MEJORA*res0) break;
     }
     x = xTry;
-    if (resTry < 1e-4) { converged = true; break; }
+    if (errTry < TOL_CURVA) { converged = true; break; }
   }
   if (!converged) return {H:null, x:null};
 
@@ -171,7 +179,7 @@ function computeSystemCurve(red, pumpArc, nPts=14) {
   }
   const step0 = Qmax / nPts;
 
-  const freeNodes = red.nodes.filter(n=>n.type==='junction');
+  const freeNodes = nodosLibresConectados(red);
   const Qanchor = Qanchor0;
   const anchorX0 = (Qanchor!=null && freeNodes.length && freeNodes.every(n=>n.H!=null))
     ? freeNodes.map(n=>n.H) : null;

@@ -2,6 +2,8 @@
 'use strict';
 /* Solver de la red: Newton-Raphson con Jacobiano analítico, búsqueda de línea y continuación adaptativa. Sin DOM ni estado global. */
 
+const CAUDAL_INVERSO_M3H = 1e-6;   // [m³/h] por debajo de −este valor una bomba se considera con caudal inverso (el ruido de convergencia en una bomba a caudal 0 es de ~1e-9)
+
 // [repo] Antes leía state, fluid y los campos de pantalla (tolerancia, iteraciones máx.). Ahora recibe todo por parámetro:
 //   red = {nodes, arcs, fluid:{rho, nu}}   opc = {tol, maxIter} (valor no numérico o 0 → 1e-4 y 300, igual que antes)
 function solveNetwork(red, opc) {
@@ -109,12 +111,14 @@ function solveNetwork(red, opc) {
     function buildFJ(xv) {
       const F = new Array(N).fill(0);
       const J = Array.from({length:N},()=>new Array(N).fill(0));
+      const circ = new Array(NF).fill(0);   // [v26] caudal que circula por cada nodo libre (m³/s), para el criterio de convergencia relativo
 
       // ── (1) Continuity equations for each free node ──
       for (let i=0; i<NF; i++) {
         const node = freeNodes[i];
         const Hi = xv[i];
         F[i] = -node.demand/3600;  // m³/s, demand is a sink (subtract)
+        circ[i] = Math.abs(node.demand)/3600;
 
         // Contribution from non-pump arcs connected to this node
         for (const arc of nonPumpArcs) {
@@ -134,14 +138,10 @@ function solveNetwork(red, opc) {
 
           let Q_ms = 0, cond = 0;  // m³/s, conductance ∂Q/∂dH
 
-          if (arc.type === 'pipe' || arc.type === 'check') {
-            // Check valve: only allow positive flow (from→to)
-            if (arc.type === 'check' && dH < 0) {
-              Q_ms = 0; cond = 0;
-            } else {
-              const r = pipeCalc(dH, arc, fluid);
-              Q_ms = r.Q/3600; cond = r.cond/3600;
-            }
+          if (arc.type === 'pipe' || arc.type === 'check' || arc.type === 'valve') {
+            // [v26] Fuente única (caudalTramo): una retención solo deja pasar de «desde» a «hasta». Las válvulas de reducción
+            // de presión (prv) se tratan como una tubería abierta, como siempre.
+            ({Q_ms, cond} = caudalTramo(arc, dH, fluid));
           } else if (arc.type === 'equip') {
             // Calibrated model: Q = Q_ref × √(effDH / dpH)
             // Q_ref = π×D²/4 × 2 m/s  (nozzle @ 2 m/s reference velocity, D hidden from UI)
@@ -168,19 +168,9 @@ function solveNetwork(red, opc) {
             // convergencia.
             const effDHforCond = Math.max(effDH, 0.02*dpH);
             cond = (Q_REF * Math.sqrt(effDHforCond/dpH)) / (2*effDHforCond);
-          } else if (arc.type === 'valve') {
-            if (arc.valveType === 'check') {
-              if (dH < 0) { Q_ms=0; cond=0; }
-              else { const r=pipeCalc(dH,arc, fluid); Q_ms=r.Q/3600; cond=r.cond/3600; }
-            } else if (arc.valveType === 'prv') {
-              // PRV: downstream head fixed at setpoint (handled specially)
-              // For now treat as fully open pipe
-              const r=pipeCalc(dH,arc, fluid); Q_ms=r.Q/3600; cond=r.cond/3600;
-            } else {
-              const r=pipeCalc(dH,arc, fluid); Q_ms=r.Q/3600; cond=r.cond/3600;
-            }
           }
 
+          circ[i] += Math.abs(Q_ms);
           // Add to continuity: positive Q means flow into node
           if (arc.fromId === node.id) {
             F[i] -= Q_ms;      // flow leaving
@@ -200,17 +190,19 @@ function solveNetwork(red, opc) {
           if (parc.fromId === node.id) {
             F[i] -= Qp;
             J[i][NF+p] = -1;
+            circ[i] += Math.abs(Qp);
           } else if (parc.toId === node.id) {
             F[i] += Qp;
             J[i][NF+p] = 1;
+            circ[i] += Math.abs(Qp);
           }
         }
         // [v17] Contribución de bombas en modo "caudal fijo": el caudal es un dato conocido,
         // no una incógnita — solo aporta al lado derecho (F), sin columna en el Jacobiano.
         for (const parc of fixedQPumps) {
           const Qfix = (fqValues[parc.id]||0)/3600; // m³/s
-          if (parc.fromId === node.id) F[i] -= Qfix;
-          else if (parc.toId === node.id) F[i] += Qfix;
+          if (parc.fromId === node.id) { F[i] -= Qfix; circ[i] += Math.abs(Qfix); }
+          else if (parc.toId === node.id) { F[i] += Qfix; circ[i] += Math.abs(Qfix); }
         }
       }
 
@@ -237,19 +229,29 @@ function solveNetwork(red, opc) {
           F[eq] = Hto - Hfrom - Hp;
           const fi = freeIdx[parc.fromId]; if (fi !== undefined) J[eq][fi] = -1;
           const ti = freeIdx[parc.toId];   if (ti !== undefined) J[eq][ti] =  1;
-          const dHdQ = pumpHeadDeriv(Math.abs(Qp_m3h)/nP_, parc) * 3600 / nP_;
+          // [v26] La carga usa |Q|, así que la derivada respecto de Q lleva el signo de Q: v25 usaba siempre la de Q > 0, y con un caudal de
+          // bomba apenas negativo (la bomba que alimenta un nodo sin salida, Q → 0 desde el lado «inverso») Newton daba el paso al revés.
+          const dHdQ = pumpHeadDeriv(Math.abs(Qp_m3h)/nP_, parc) * 3600 / nP_ * (Qp < 0 ? -1 : 1);
           J[eq][eq] = -dHdQ;
         }
       }
 
-      return {F, J};
+      return {F, J, circ};
     }
+
+    // [v26] Error de convergencia: continuidad relativa al caudal de cada nodo (errorContinuidad) y, en las ecuaciones de
+    // energía de las bombas (en m), el valor absoluto. residual (norma de F) se sigue informando, pero ya no decide.
+    const errorDe = (F, circ) => {
+      let e = errorContinuidad(F, circ, NF);
+      for (let p=NF; p<N; p++) { const r = Math.abs(F[p]); if (!Number.isFinite(r)) return Infinity; if (r > e) e = r; }
+      return e;
+    };
 
     for (let iter=0; iter<MAXITER; iter++) {
       iterations++;
-      const {F, J} = buildFJ(x);
+      const {F, J, circ} = buildFJ(x);
       const res0 = Math.sqrt(F.reduce((s,v)=>s+v*v,0));
-      if (res0 < TOL) { residual = res0; return {ok:true, x, iterations, residual}; }
+      if (errorDe(F, circ) < TOL) { residual = res0; return {ok:true, x, iterations, residual}; }
 
       // ── Solve J·Δx = -F via Gaussian elimination ──
       const dx = gaussSolve(J, F.map(v=>-v));
@@ -272,19 +274,19 @@ function solveNetwork(red, opc) {
       // del modelo de Equipo: sin esto, Newton quedaba rebotando en un ciclo de 2 iteraciones
       // (un lado corrige de más, el otro corrige de más en sentido contrario) sin bajar nunca
       // del residuo por debajo de la tolerancia, sin importar cuántas iteraciones se le dieran.
-      let xTry = x, resTry = res0;
+      let xTry = x, resTry = res0, errTry = Infinity;
       for (let bt=0; bt<12; bt++) {
         const lam = lamBase * Math.pow(0.5, bt);
         const xCand = x.slice();
         for (let i=0; i<N; i++) xCand[i] += lam*dx[i];
-        const { F: Fcand } = buildFJ(xCand);
+        const { F: Fcand, circ: circCand } = buildFJ(xCand);
         const resCand = Math.sqrt(Fcand.reduce((s,v)=>s+v*v,0));
-        if (resCand < resTry || bt === 0) { xTry = xCand; resTry = resCand; }
-        if (resCand < res0) break;  // esta fracción del paso mejora el residuo — aceptarla
+        if (resCand < resTry || bt === 0) { xTry = xCand; resTry = resCand; errTry = errorDe(Fcand, circCand); }
+        if (resCand <= LS_MEJORA*res0) break;  // esta fracción del paso mejora claramente el residuo — aceptarla
       }
       for (let i=0; i<N; i++) x[i] = xTry[i];
       residual = resTry;
-      if (residual < TOL) return {ok:true, x, iterations, residual};
+      if (errTry < TOL) return {ok:true, x, iterations, residual};
     }
     return {ok:false, x, iterations, residual};
   }
@@ -472,10 +474,10 @@ function solveNetwork(red, opc) {
       const _D = (arc.D_mm||200)/1000, _A = Math.PI*_D*_D/4;
       const Q_REF = _A * 2.0;
       Q[arc.id] = effDH > 0 ? Q_REF * Math.sqrt(effDH/dpH) * 3600 : 0;
-    } else if (arc.type==='check') {
-      Q[arc.id] = dH_raw >= 0 ? pipeCalc(dH_raw, arc, fluid).Q : 0;
     } else {
-      Q[arc.id] = pipeCalc(dH_raw, arc, fluid).Q;  // m³/h, signed
+      // [v26] Misma regla que el cálculo: una retención (tipo 'check' o elemento Válvula de retención) contra la corriente da
+      // caudal 0. En v25 el elemento Válvula informaba el caudal inverso que habría sin retención aunque el solver la bloqueaba.
+      Q[arc.id] = caudalTramo(arc, dH_raw, fluid).Q_m3h;  // m³/h, signed
     }
   }
 
@@ -509,7 +511,7 @@ function solveNetwork(red, opc) {
         arcRes[arc.id] = {Q:Qa, V, Re, f, hf, regime};
         continue;
       }
-      if (arc.type==='check' && dH < 0) dH = 0;
+      if (esRetencion(arc) && dH < 0) dH = 0;
       const r = pipeCalc(dH, calcArc, fluid);
       V=r.V; Re=r.Re; f=r.f; hf=r.hf; regime=r.regime;
     } else {
@@ -555,11 +557,21 @@ function solveNetwork(red, opc) {
     ? ` ⚠️ ${runoutWarnings.join(', ')} en caudal máximo de curva — verificar diseño.`
     : '';
 
+  // [v26] Bomba con caudal inverso: la carga de la bomba se calcula con |Q|, así que las ecuaciones tienen además un equilibrio en que el
+  // agua atraviesa la bomba al revés (la red exige más carga que la que da la bomba, p. ej. un tanque de salida más alto que su carga a caudal
+  // cero). Es una solución de las ecuaciones, pero no de la red: una bomba no tiene curva para ese sentido. Se informa como error en lugar de
+  // mostrar esos caudales (v25, según el camino de Newton, daba «No convergió» o ese resultado). Una retención en serie con la bomba la bloquea.
+  const inversas = converged ? pumpArcs.filter(a => (Q[a.id]||0) < -CAUDAL_INVERSO_M3H) : [];
+  const invMsg = inversas.map(a => `${a.label} (${Q[a.id].toFixed(1)} m³/h)`).join(', ');
+  const valido = converged && !inversas.length;
+
   return {
-    ok: converged,
-    msg: converged
+    ok: valido,
+    msg: valido
       ? `Convergió en ${iterations} iteraciones · residuo ${lastResidual.toExponential(2)}${runoutMsg}`
-      : `No convergió en ${iterations} iter. · residuo ${lastResidual.toExponential(2)}`,
+      : converged
+        ? `Caudal inverso en ${inversas.length > 1 ? 'las bombas' : 'la bomba'} ${invMsg}: la red pide más carga que la que da la bomba (mirá la carga a caudal cero de su curva). Agregá una retención en serie o revisá los datos.`
+        : `No convergió en ${iterations} iter. · residuo ${lastResidual.toExponential(2)}`,
     iterations, residual: lastResidual,
     H, Q, nodeRes, arcRes
   };

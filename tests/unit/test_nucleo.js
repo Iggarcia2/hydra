@@ -13,19 +13,26 @@ const R = codigo => evaluar(ctx, codigo);
 const G = 9.81;
 
 // ── Referencias independientes ─────────────────────────────────────────────────────────────────────────────────────────────────
-function colebrookRef(Re, eD) {           // 1/√f = −2·log10(ε/(3,7·D) + 2,51/(Re·√f)) resuelta por bisección en f
-  if (Re < 1) return 0.02;
-  if (Re < 2300) return 64 / Re;           // el motor usa Hagen-Poiseuille por debajo de 2300 (igual que el original)
+function colebrookRef(Re, eD) {           // Colebrook-White 1/√f = −2·log10(ε/(3,7·D) + 2,51/(Re·√f)) resuelta por bisección en f (solo para Re ≥ 4000)
   const F = f => 1 / Math.sqrt(f) + 2 * Math.log10(eD / 3.7 + 2.51 / (Re * Math.sqrt(f)));
   let lo = 0.005, hi = 0.2;
   for (let i = 0; i < 200; i++) { const m = (lo + hi) / 2; (F(lo) * F(m) <= 0) ? hi = m : lo = m; }
   return (lo + hi) / 2;
 }
+function fRef(Re, eD) {                   // la ley de fricción de la especificación (README), escrita aparte del motor
+  if (!(Re > 0)) return 0.02;             // sin flujo (el 0,02 para Re < 1 es solo el valor que muestra el motor; la pérdida laminar es exacta)
+  if (Re < 2300) return 64 / Re;          // laminar
+  if (Re < 4000) { const fL = 64 / 2300, fT = colebrookRef(4000, eD); return fL + (fT - fL) * (Re - 2300) / (4000 - 2300); }   // transición: lineal en Re
+  return colebrookRef(Re, eD);
+}
 function hfRef(Qm3h, D_mm, L_m, eps_mm, K, nu) {   // pérdida de carga [m] de un tramo (Darcy-Weisbach + K)
   const D = D_mm / 1000, A = Math.PI * D * D / 4, V = Math.abs(Qm3h) / 3600 / A, Re = V * D / nu;
   if (V === 0) return 0;
-  const f = colebrookRef(Re, eps_mm / 1000 / D);
+  const f = fRef(Re, eps_mm / 1000 / D);
   return (f * L_m / D + K) * V * V / (2 * G);
+}
+function QdeHfRef(dH, D_mm, L_m, eps_mm, K, nu) {   // caudal [m³/h] que produce una pérdida dH, por bisección sobre hfRef (hf crece con Q)
+  return biseccion(Q => hfRef(Q, D_mm, L_m, eps_mm, K, nu) - dH, 0, 1e5);
 }
 function biseccion(F, lo, hi) { for (let i = 0; i < 200; i++) { const m = (lo + hi) / 2; (F(lo) * F(m) <= 0) ? hi = m : lo = m; } return (lo + hi) / 2; }
 const NU = 1.004e-6, RHO = 998.2;
@@ -82,21 +89,91 @@ prueba('getWaterProps(): temperatura no numérica → error claro (antes devolv�
 });
 
 seccion('Fricción y caudal de un tramo');
-prueba('colebrook(): laminar 64/Re, valor mínimo para Re<1 y coincidencia con una resolución independiente', () => {
-  igual(R('colebrook(0.5, 0.001)'), 0.02); igual(R('colebrook(1000, 0.001)'), 0.064); igual(R('colebrook(2299, 0)'), 64 / 2299);
-  for (const Re of [2300, 4000, 1e4, 1e5, 1e6, 1e7]) for (const eD of [0, 1e-5, 1e-3, 0.01, 0.05])
-    cercano(R(`colebrook(${Re}, ${eD})`), colebrookRef(Re, eD), 1e-7, `Re=${Re} e/D=${eD}`);
+prueba('frictionFactor(): 64/Re laminar, continuo en Re 2300 y 4000, lineal entre ambos y Colebrook por encima', () => {
+  igual(R('frictionFactor(0.5, 0.001)'), 0.02); igual(R('frictionFactor(1000, 0.001)'), 0.064); igual(R('frictionFactor(2299, 0)'), 64 / 2299);
+  igual(R('frictionFactor(NaN, 0.001)'), 0.02, 'Re no numérico → valor de resguardo');
+  for (const eD of [0, 1e-5, 5e-4, 1e-3, 0.01, 0.05]) {
+    const fL = 64 / 2300, fT = R(`frictionFactor(4000, ${eD})`);
+    cercano(R(`frictionFactor(2300, ${eD})`), fL, 1e-12, 'en 2300 vale 64/Re (e/D=' + eD + ')');
+    cercano(R(`frictionFactor(2299.999999, ${eD})`), fL, 1e-6, 'continuo por debajo de 2300');
+    cercano(R(`frictionFactor(3999.999999, ${eD})`), fT, 1e-6, 'continuo por debajo de 4000');
+    cercano(R(`frictionFactor(3150, ${eD})`), (fL + fT) / 2, 1e-12, 'punto medio de la transición');
+    cierto(fT > fL, 'en la transición f crece con Re (e/D=' + eD + ')');
+    for (const Re of [1e4, 1e5, 1e6, 1e7]) cercano(R(`frictionFactor(${Re}, ${eD})`), fRef(Re, eD), 1e-7, `Re=${Re} e/D=${eD}`);
+  }
+  // v25 saltaba de 0,0278 a 0,0477 en Re=2300 (e/D=0,0005): el salto ya no existe
+  cierto(Math.abs(R('frictionFactor(2300, 0.0005)') - R('frictionFactor(2299.9999, 0.0005)')) < 1e-5);
 });
-prueba('colebrook(): valor de manual (Re=1e5, e/D=0,001 → f≈0,0222) y Blasius para tubo liso', () => {
+prueba('colebrook() (turbulento): coincide con una resolución independiente y con valores de manual', () => {
+  for (const Re of [4000, 1e4, 1e5, 1e6, 1e7]) for (const eD of [0, 1e-5, 1e-3, 0.01, 0.05])
+    cercano(R(`colebrook(${Re}, ${eD})`), colebrookRef(Re, eD), 1e-7, `Re=${Re} e/D=${eD}`);
   cercano(R('colebrook(1e5, 0.001)'), 0.0222, 0.01);
   cercano(R('colebrook(1e5, 0)'), 0.3164 / Math.pow(1e5, 0.25), 0.03);   // Blasius es aproximado: ±3 %
 });
-prueba('pipeCalc(): flujo laminar contra Hagen-Poiseuille (Q = π·g·D⁴·ΔH / (128·ν·L))', () => {
+prueba('pipeCalc(): flujo laminar igual a Hagen-Poiseuille (Q = π·g·D⁴·ΔH / (128·ν·L)), sin el ~0,1 % de error de v25', () => {
   const arc = R(`mkArc('pipe',1,2,{D_mm:20,L_m:10,eps_mm:0.046})`); ctx.__a = arc;
   const c = R('pipeCalc(0.5, __a, {rho:900, nu:1e-4})');
-  const Qh = Math.PI * G * Math.pow(0.02, 4) * 0.5 / (128 * 1e-4 * 10) * 3600;
-  cercano(c.Q, Qh, 5e-3, 'caudal laminar');          // el cálculo itera 12 veces: en régimen muy laminar queda a ~0,14 % de la solución cerrada
-  igual(c.regime, 'Laminar'); cierto(c.Re < 2300);
+  const Qh = Math.PI * 9.81 * Math.pow(0.02, 4) * 0.5 / (128 * 1e-4 * 10) * 3600;
+  cercano(c.Q, Qh, 1e-12, 'caudal laminar (fórmula cerrada)');
+  igual(c.regime, 'Laminar'); cierto(c.Re < 2300); cercano(c.f, 64 / c.Re, 1e-12);
+});
+prueba('pipeCalc(): laminar con pérdidas localizadas (K) cierra ΔH = b·V + a·V² con la ley 64/Re', () => {
+  for (const [D, L, K, dH, nu] of [[50, 100, 2.5, 0.8, 1e-4], [100, 20, 10, 0.3, 3e-5], [25, 5, 40, 0.5, 2e-4]]) {
+    ctx.__a = R(`mkArc('pipe',1,2,{D_mm:${D},L_m:${L},customK:${K}})`);
+    const c = R(`pipeCalc(${dH}, __a, {rho:900, nu:${nu}})`);
+    cierto(c.Re < 2300, 'tiene que ser laminar: Re=' + c.Re);
+    cercano(hfRef(c.Q, D, L, 0.046, K, nu), dH, 1e-9, `D=${D} L=${L} K=${K}`);
+  }
+});
+prueba('pipeCalc(): rugosidad 0 (tubo liso) se respeta; solo la falta del dato usa acero (0,046 mm); la negativa vale 0', () => {
+  const Q = eps => { ctx.__a = R(`mkArc('pipe',1,2,{D_mm:100,L_m:100})`); if (eps === 'sin') delete ctx.__a.eps_mm; else ctx.__a.eps_mm = eps; return R(`pipeCalc(5, __a, {rho:998.2, nu:${NU}})`); };
+  cercano(Q(0).Q, QdeHfRef(5, 100, 100, 0, 0, NU), 1e-6, 'ε = 0');
+  cierto(Q(0).Q > Q(0.0015).Q && Q(0.0015).Q > Q(0.046).Q, 'más liso → más caudal (v25 trataba ε=0 como acero)');
+  cercano(Q('sin').Q, QdeHfRef(5, 100, 100, 0.046, 0, NU), 1e-6, 'sin dato → acero comercial');
+  igual(Q(-0.1).Q, Q(0).Q, 'ε negativa se toma como 0');
+  igual(R('arcEpsMm({eps_mm:0})'), 0); igual(R('arcEpsMm({})'), 0.046); igual(R('arcEpsMm({eps_mm:null})'), 0.046);
+  cercano(R('arcEpsMm({eps_mm:0.046, fouling_mm:0.5})'), 0.546, 1e-12); igual(R('arcEpsMm({eps_mm:0.1, fouling_mm:-3})'), 0.1);
+});
+prueba('pipeCalc(): en todo el rango (laminar, transición, turbulento) el caudal crece con ΔH, sin saltos, y coincide con la bisección independiente', () => {
+  for (const [D, L, eps, K] of [[100, 100, 0.046, 0], [50, 30, 0.0015, 4], [200, 300, 0.26, 0], [25, 10, 0, 12]]) {
+    ctx.__a = R(`mkArc('pipe',1,2,{D_mm:${D},L_m:${L},eps_mm:${eps},customK:${K}})`);
+    let prev = 0, prevQ = 0, vistos = new Set();
+    for (let e = -7; e <= 1.5; e += 0.03) {
+      const dH = Math.pow(10, e), c = R(`pipeCalc(${dH}, __a, {rho:998.2, nu:${NU}})`);
+      cierto(c.Q > prevQ, `Q no creció en ΔH=${dH} (D=${D})`);
+      if (prevQ > 0) cierto(c.Q / prevQ < 1.3, `salto de caudal ${prevQ} → ${c.Q} en ΔH=${dH} (D=${D})`);
+      cercano(c.Q, QdeHfRef(dH, D, L, eps, K, NU), 1e-8, `ΔH=${dH} D=${D}`);
+      prevQ = c.Q; vistos.add(c.regime);
+    }
+    cierto(vistos.has('Laminar') && vistos.has('Transición') && vistos.has('Turbulento'), 'el barrido tiene que pasar por los tres regímenes: ' + [...vistos]);
+  }
+});
+prueba('pipeCalc(): la conductancia ∂Q/∂ΔH que usa Newton es la derivada real en laminar y transición (y Q/(2ΔH) en turbulento, como v25)', () => {
+  ctx.__a = R(`mkArc('pipe',1,2,{D_mm:100,L_m:100,customK:3})`);
+  const Q = dH => R(`pipeCalc(${dH}, __a, {rho:998.2, nu:${NU}})`);
+  for (const dH of [1e-5, 1e-4, 4e-4, 8e-4, 1.5e-3, 3e-3]) {         // laminar y transición (Re < 4000)
+    const h = dH * 1e-4, d = (Q(dH + h).Q - Q(dH - h).Q) / (2 * h) / 3600, c = Q(dH);
+    cierto(c.Re < 4000, 'Re=' + c.Re); cercano(c.cond / 3600, d, 1e-5, `ΔH=${dH} (${c.regime})`);
+  }
+  const t = Q(10); cierto(t.Re > 4000); cercano(t.cond, t.Q / (2 * 10), 1e-12, 'turbulento: Q/(2·ΔH)');
+});
+
+prueba('pipeCalc() y caudalTramo(): con ΔH = 0 (o una retención cerrada) el caudal es 0 pero la conductancia NO (v25: 0 → «sistema singular» en un nodo sin salida)', () => {
+  const fl = `{rho:998.2, nu:${NU}}`;
+  ctx.__a = R(`mkArc('pipe',1,2,{D_mm:100,L_m:100,customK:3})`);
+  const D = 0.1, A = Math.PI * D * D / 4, b = 32 * NU * 100 / (G * D * D);
+  const c0 = R(`pipeCalc(0, __a, ${fl})`);
+  igual(c0.Q, 0); cercano(c0.cond / 3600, A / b, 1e-9, 'límite laminar A/b');
+  const c1 = R(`pipeCalc(1e-14, __a, ${fl})`); igual(c1.Q, 0); cercano(c1.cond, c0.cond, 1e-9);
+  ctx.__v = R(`mkArc('valve',1,2,{valveType:'gate',open_pct:100,D_mm:100})`);       // arco Válvula: sin fricción de tramo (solo K) → piso de siempre
+  const cv = R(`pipeCalc(0, __v, ${fl})`); igual(cv.Q, 0); cercano(cv.cond / 3600, 1e-6, 1e-12);
+  // sigue en 0 lo que no tiene sentido: diámetro 0, sin resistencia, dH no finito
+  ctx.__z = R(`mkArc('pipe',1,2,{D_mm:0,L_m:100})`); igual(R(`pipeCalc(0, __z, ${fl})`).cond, 0);
+  igual(R(`pipeCalc(NaN, __a, ${fl})`).cond, 0);
+  // retención contra la corriente: caudal 0 y una conductancia chica pero positiva (para que Newton pueda abrirla); a favor, la de la tubería
+  ctx.__k = R(`mkArc('check',1,2,{D_mm:100,L_m:50})`);
+  const cc = R(`caudalTramo(__k, -3, ${fl})`); igual(cc.Q_ms, 0); igual(cc.Q_m3h, 0); cierto(cc.cond > 0 && cc.cond <= 1e-5, 'cond ' + cc.cond);
+  const cf = R(`caudalTramo(__k, 3, ${fl})`); cierto(cf.Q_m3h > 0 && cf.cond > cc.cond);
 });
 prueba('pipeCalc(): turbulento cierra la ecuación de Darcy-Weisbach (ΔH = f·L/D·V²/2g + K·V²/2g)', () => {
   for (const [D, L, eps, dH] of [[100, 100, 0.046, 10], [300, 500, 0.15, 3], [50, 20, 0.0015, 25], [200, 1000, 0.26, 40]]) {
@@ -167,6 +244,8 @@ prueba('pumpHead(): interpola, extrapola con tope y devuelve 50 m si la curva es
 prueba('pumpHeadDeriv(), pumpMaxQ() y pumpPower()', () => {
   ctx.__a = R(`mkArc('pump',1,2,{nPumps:2, pumpCurve:[{Q:0,H:40},{Q:100,H:30},{Q:200,H:10}], powerCurve:[{Q:0,P:5},{Q:200,P:15}]})`);
   cercano(R('pumpHeadDeriv(50, __a)'), -0.1, 1e-9); cercano(R('pumpHeadDeriv(150, __a)'), -0.2, 1e-9);
+  // caudal casi nulo: la pendiente es la del primer tramo de la curva (v25 daba −0,005 en vez de −0,1 con Q = 0,03: la diferencia central cruzaba el cero)
+  for (const q of [0, 0.03, 0.4, -0.03]) cercano(R(`pumpHeadDeriv(${q}, __a)`), -0.1, 1e-9, 'Q = ' + q);
   igual(R('pumpMaxQ(__a)'), 400, 'dos bombas en paralelo');
   cercano(R('pumpPower(100, __a)'), 10, 1e-12); igual(R('pumpPower(0, __a)'), 5); cercano(R('pumpPower(300, __a)'), 20, 1e-12);
   ctx.__b = R(`mkArc('pump',1,2,{powerCurve:[]})`); igual(R('pumpPower(10, __b)'), null);
@@ -196,11 +275,44 @@ prueba('calcArieteTramo(): clasificación de riesgo por umbrales de sobrepresió
   igual(nivel(0), '🟢 Bajo'); igual(nivel(0.2), '🟢 Bajo'); igual(nivel(0.5), '🟡 Medio'); igual(nivel(1.0), '🔴 Alto'); igual(nivel(-1.0), '🔴 Alto', 'el sentido del flujo no importa');
   ctx.__a = R(`mkArc('pipe',1,2,{})`); ctx.__a.V = null; igual(R(`calcArieteTramo(__a, {rho:998.2, nu:${NU}}, 0)`).dP, 0, 'sin resultado de velocidad');
 });
-prueba('HALLAZGO conocido: el módulo de Young se busca con una clave que no existe y todo material usa el del acero', () => {
-  // Se conserva el comportamiento del original (ver README, «Hallazgos»). Si algún día se corrige, este test falla a propósito: actualizarlo.
-  const a = eps => { ctx.__a = R(`mkArc('pipe',1,2,{D_mm:200,L_m:100,wall_mm:10,eps_mm:${eps}})`); ctx.__a.V = 1; return R(`calcArieteTramo(__a, {rho:998.2, nu:${NU}}, 0)`).a; };
-  const ref = ariete(0.2, 0.01, 998.2, 1, 100).a;
-  cercano(a(0.046), ref, 1e-12, 'acero carbono'); cercano(a(0.0015), ref, 1e-12, 'PVC/HDPE/cobre usan el módulo del acero'); cercano(a(0.26), ref, 1e-12, 'fundición');
+prueba('calcArieteTramo(): el módulo de Young sale del material del tramo (v25: todos usaban el del acero)', () => {
+  const E = { 'Acero inoxidable': 200e9, 'Acero carbono': 200e9, 'Acero galvanizado': 200e9, 'PVC': 3e9, 'HDPE': 0.8e9, 'Cobre': 120e9, 'Fundición gris': 170e9 };
+  const celer = (D, e, rho, E_) => Math.sqrt(2.1e9 / rho) / Math.sqrt(1 + 2.1e9 * D / (E_ * e));
+  for (const [m, E_] of Object.entries(E)) {
+    ctx.__a = R(`mkArc('pipe',1,2,{D_mm:200,L_m:100,wall_mm:10})`); ctx.__a.material = m; ctx.__a.eps_mm = R(`MATERIALS.find(x => x.label === ${JSON.stringify(m)}).eps`); ctx.__a.V = 1;
+    cercano(R(`calcArieteTramo(__a, {rho:998.2, nu:${NU}}, 0)`).a, celer(0.2, 0.01, 998.2, E_), 1e-12, m);
+  }
+  const a = R(`calcArieteTramo(__a, {rho:998.2, nu:${NU}}, 0)`);
+  igual(a.material, 'Fundición gris'); igual(a.E, 170e9);
+  // PVC y HDPE dan una celeridad mucho menor que el acero, y por lo tanto una sobrepresión menor
+  const dP = m => { ctx.__a = R(`mkArc('pipe',1,2,{D_mm:100,L_m:100,wall_mm:6,eps_mm:0.0015})`); ctx.__a.material = m; ctx.__a.V = 2; return R(`calcArieteTramo(__a, {rho:998.2, nu:${NU}}, 0)`).dP; };
+  cierto(dP('HDPE') < dP('PVC') && dP('PVC') < dP('Cobre'), 'HDPE < PVC < cobre');
+  cierto(dP('PVC') < 0.5 * R(`(() => { const a = mkArc('pipe',1,2,{D_mm:100,L_m:100,wall_mm:6,eps_mm:0.046}); a.V = 2; return calcArieteTramo(a, {rho:998.2, nu:${NU}}, 0).dP; })()`), 'PVC bien por debajo del acero');
+});
+prueba('calcArieteTramo(): material no determinable (ε compartida o material viejo) → módulo del acero, del lado conservador', () => {
+  const t = extra => { ctx.__a = R(`mkArc('pipe',1,2,{D_mm:200,L_m:100,wall_mm:10,eps_mm:${extra.eps}})`); if (extra.material) ctx.__a.material = extra.material; ctx.__a.V = 1; return R(`calcArieteTramo(__a, {rho:998.2, nu:${NU}}, 0)`); };
+  let r = t({ eps: 0.0015 }); igual(r.material, null, 'ε = 0,0015 sin material: ambiguo'); igual(r.E, 200e9);
+  r = t({ eps: 0.046 }); igual(r.material, 'Acero carbono', 'única con esa ε → se deduce'); r = t({ eps: 0.26 }); igual(r.material, 'Fundición gris');
+  r = t({ eps: 0.046, material: 'PVC' }); igual(r.material, 'Acero carbono', 'material guardado que ya no coincide con la ε escrita a mano: manda la ε');
+  r = t({ eps: 0.5 }); igual(r.material, null); igual(r.E, 200e9);
+  r = t({ eps: 0.0015, material: 'inventado' }); igual(r.material, null);
+  igual(R(`etiquetaMaterial({eps_mm:0.0015})`), 'ε=0.0015 mm'); igual(R(`etiquetaMaterial({eps_mm:0.0015, material:'Cobre'})`), 'Cobre'); igual(R(`etiquetaMaterial({})`), 'Acero carbono');
+});
+prueba('DN_LIST: cada diámetro interior es el de acero Schedule 40 (D = OD − 2·t con los OD de ASME B36.10M); v25 tenía DN350/400/450/600 mal', () => {
+  const OD = { 'DN25': 33.4, 'DN40': 48.26, 'DN50': 60.33, 'DN65': 73.03, 'DN80': 88.9, 'DN100': 114.3, 'DN125': 141.3, 'DN150': 168.28, 'DN200': 219.08, 'DN250': 273.05,
+    'DN300': 323.85, 'DN350': 355.6, 'DN400': 406.4, 'DN450': 457.2, 'DN500': 508, 'DN600': 609.6 };
+  const T40 = { 'DN25': 3.38, 'DN40': 3.68, 'DN50': 3.91, 'DN65': 5.16, 'DN80': 5.49, 'DN100': 6.02, 'DN125': 6.55, 'DN150': 7.11, 'DN200': 8.18, 'DN250': 9.27, 'DN300': 10.31,
+    'DN350': 11.13, 'DN400': 12.70, 'DN450': 14.27, 'DN500': 15.09, 'DN600': 17.48 };
+  const lista = R('DN_LIST.filter(d => d.D !== null).map(d => ({label: d.label, D: d.D, t: d.t}))');
+  igual(lista.length, 16);
+  for (const d of lista) {
+    const dn = d.label.split(' ')[0];
+    cierto(OD[dn] !== undefined, 'DN desconocido ' + dn);
+    cierto(d.D < OD[dn], dn + ': el interior no puede superar el exterior (' + d.D + ' vs ' + OD[dn] + ')');
+    cercano(d.t, T40[dn], 1e-9, dn + ' espesor Sch40');
+    cercano(d.D, OD[dn] - 2 * T40[dn], 0.1 / d.D, dn + ' interior = OD − 2·t');      // ±0,1 mm (los redondeos de la norma)
+  }
+  const orden = lista.map(d => d.D); for (let i = 1; i < orden.length; i++) cierto(orden[i] < orden[i - 1], 'la lista va de mayor a menor');
 });
 prueba('pipeWallThickness(): espesor indicado, 6 % del diámetro y mínimo de 5 mm', () => {
   igual(R('pipeWallThickness({wall_mm: 8})'), 0.008); cercano(R('pipeWallThickness({D_mm: 200})'), 0.012, 1e-12);
@@ -257,6 +369,20 @@ prueba('dos bombas iguales en paralelo (nPumps=2) entregan el doble de caudal a 
   ctx.__a = r2.arcs[0];
   cercano(s2.arcRes[r2.arcs[0].id].hf, R(`pumpHead(${s2.arcRes[r2.arcs[0].id].Q / 2}, __a)`), 1e-5, 'cada bomba trabaja con la mitad del caudal');
 });
+prueba('bomba que no alcanza a vencer al tanque de salida: error explícito por caudal inverso (no un resultado con la bomba al revés); con una retención en serie queda a caudal 0', () => {
+  const sin = red(`${FL} const A=mkNode('tank',0,0,{label:'A',cota:0}), J=mkNode('junction',0,0,{label:'J',cota:0}), B=mkNode('tank',0,0,{label:'B',cota:60});
+    const bm=mkArc('pump',A.id,J.id,{label:'BM', pumpCurve:[{Q:0,H:40},{Q:100,H:36},{Q:200,H:28},{Q:300,H:15},{Q:400,H:0}]}), p=mkArc('pipe',J.id,B.id,{D_mm:150,L_m:200});
+    return {nodes:[A,J,B],arcs:[bm,p],fluid:fl};`);
+  const s1 = resolver(sin); igual(s1.ok, false, 'la bomba da 40 m y el tanque está a 60 m');
+  cierto(/Caudal inverso en la bomba BM \(-/.test(s1.msg) && /retención/.test(s1.msg), s1.msg);
+  const con = red(`${FL} const A=mkNode('tank',0,0,{label:'A',cota:0}), J=mkNode('junction',0,0,{label:'J',cota:0}), K=mkNode('junction',0,0,{label:'K',cota:0}), B=mkNode('tank',0,0,{label:'B',cota:60});
+    const bm=mkArc('pump',A.id,J.id,{label:'BM', pumpCurve:[{Q:0,H:40},{Q:100,H:36},{Q:200,H:28},{Q:300,H:15},{Q:400,H:0}]});
+    return {nodes:[A,J,K,B],arcs:[bm,mkArc('check',J.id,K.id,{D_mm:150,L_m:1}),mkArc('pipe',K.id,B.id,{D_mm:150,L_m:200})],fluid:fl};`);
+  const s2 = resolver(con); cierto(s2.ok, s2.msg);
+  cercano(s2.arcRes[con.arcs[0].id].Q, 0, 1, 'la bomba trabaja a caudal cero (carga de cierre 40 m)', 1e-6);
+  cercano(s2.nodeRes[con.nodes[1].id].H, 40, 1e-9, 'J queda a la carga de cierre de la bomba');
+  cercano(s2.nodeRes[con.nodes[2].id].H, 60, 1e-9, 'K queda a la carga del tanque B (la retención está cerrada)');
+});
 prueba('bomba de caudal fijo: la carga que aporta es el desnivel más las pérdidas', () => {
   const r = red(`${FL} const A=mkNode('tank',0,0,{label:'A',cota:0}), J=mkNode('junction',0,0,{label:'J'}), B=mkNode('tank',0,0,{label:'B',cota:12});
     const bm=mkArc('pump',A.id,J.id,{pumpMode:'fixedQ', fixedQ_m3h:60}), p=mkArc('pipe',J.id,B.id,{D_mm:100,L_m:150});
@@ -286,19 +412,75 @@ prueba('equipo con pérdida fija (dp_bar): el caudal pasa y el salto de carga es
   const s = resolver(r); cierto(s.ok, s.msg);
   const Q = s.arcRes[r.arcs[1].id].Q; cierto(Q > 0); cercano(s.arcRes[r.arcs[0].id].Q, Q, 1e-6);
 });
-prueba('la viscosidad y la densidad del fluido se usan: más viscoso → menos caudal', () => {
+prueba('la viscosidad y la densidad del fluido se usan: más viscoso → menos caudal (en régimen turbulento)', () => {
   const caudal = nu => { const r = red(`const fl={rho:998.2,nu:${nu}}; const A=mkNode('tank',0,0,{label:'A',cota:10}), J=mkNode('junction',0,0,{label:'J'}), B=mkNode('tank',0,0,{label:'B',cota:0});
     const p1=mkArc('pipe',A.id,J.id,{D_mm:50,L_m:100}), p2=mkArc('pipe',J.id,B.id,{D_mm:50,L_m:100}); return {nodes:[A,J,B],arcs:[p1,p2],fluid:fl};`); const s = resolver(r); cierto(s.ok, s.msg); return s.arcRes[r.arcs[0].id].Q; };
-  const a = caudal(1e-6), b = caudal(1e-5), c = caudal(2e-5);
+  const a = caudal(1e-6), b = caudal(3e-6), c = caudal(6e-6);
   cierto(a > b && b > c, a + ' > ' + b + ' > ' + c);
 });
-prueba('HALLAZGO conocido: un fluido muy viscoso (≈100 cSt) en régimen laminar no converge, y el solver lo dice', () => {
-  // El Jacobiano usa la conductancia del régimen turbulento (Q/2ΔH); en laminar la pendiente real es Q/ΔH y Newton oscila. Se conserva el
-  // comportamiento del original (ver README, «Hallazgos»). Si algún día se corrige, este test falla a propósito: actualizarlo.
-  const r = red(`const fl={rho:998.2,nu:1e-4}; const A=mkNode('tank',0,0,{label:'A',cota:10}), J=mkNode('junction',0,0,{label:'J'}), B=mkNode('tank',0,0,{label:'B',cota:0});
-    return {nodes:[A,J,B],arcs:[mkArc('pipe',A.id,J.id,{D_mm:50,L_m:100}), mkArc('pipe',J.id,B.id,{D_mm:50,L_m:100})],fluid:fl};`);
-  const s = resolver(r, { tol: 1e-4, maxIter: 200 });
-  igual(s.ok, false); cierto(/No convergió/.test(s.msg), s.msg);
+prueba('fluido muy viscoso (de 100 a 10.000 cSt) en régimen laminar: converge y da el caudal de Hagen-Poiseuille (v25: «No convergió» con ≥ 100 cSt)', () => {
+  for (const nu of [1e-4, 1e-3, 1e-2]) {
+    const r = red(`const fl={rho:900,nu:${nu}}; const A=mkNode('tank',0,0,{label:'A',cota:10}), J=mkNode('junction',0,0,{label:'J'}), B=mkNode('tank',0,0,{label:'B',cota:0});
+      return {nodes:[A,J,B],arcs:[mkArc('pipe',A.id,J.id,{D_mm:50,L_m:100}), mkArc('pipe',J.id,B.id,{D_mm:50,L_m:100})],fluid:fl};`);
+    for (const opc of [{ tol: 1e-9, maxIter: 100 }, { tol: 1e-4, maxIter: 100 }]) {
+      const s = resolver(r, opc); cierto(s.ok, 'ν=' + nu + ' ' + s.msg);
+      const Rt = 2 * 128 * nu * 100 / (Math.PI * G * Math.pow(0.05, 4));      // resistencia laminar de los dos tramos en serie [s/m²]
+      const Qh = 10 / Rt * 3600;
+      cercano(s.arcRes[r.arcs[0].id].Q, Qh, opc.tol * 10, 'ν=' + nu + ' tol=' + opc.tol); cierto(s.arcRes[r.arcs[0].id].Re < 2300, 'Re=' + s.arcRes[r.arcs[0].id].Re);
+    }
+  }
+});
+prueba('fluido viscoso con pérdidas localizadas, bifurcación y demanda: converge y cierra la energía de cada tramo', () => {
+  const r = red(`const fl={rho:880,nu:3e-4}; const A=mkNode('tank',0,0,{label:'A',cota:20}), J=mkNode('junction',0,0,{label:'J',demand:2}), B=mkNode('tank',0,0,{label:'B',cota:2}), C=mkNode('tank',0,0,{label:'C',cota:0});
+    return {nodes:[A,J,B,C],arcs:[mkArc('pipe',A.id,J.id,{D_mm:80,L_m:60,customK:3}), mkArc('pipe',J.id,B.id,{D_mm:50,L_m:40,customK:6}), mkArc('pipe',J.id,C.id,{D_mm:40,L_m:30})],fluid:fl};`);
+  const s = resolver(r); cierto(s.ok, s.msg);
+  const [p1, p2, p3] = r.arcs.map(a => s.arcRes[a.id]), HJ = s.nodeRes[r.nodes[1].id].H;
+  cercano(p1.Q - p2.Q - p3.Q, 2, 1e-7, 'balance de masa en J');
+  cercano(hfRef(p1.Q, 80, 60, 0.046, 3, 3e-4), 20 - HJ, 1e-7, 'energía A→J'); cercano(hfRef(p2.Q, 50, 40, 0.046, 6, 3e-4), HJ - 2, 1e-7, 'energía J→B'); cercano(hfRef(p3.Q, 40, 30, 0.046, 0, 3e-4), HJ - 0, 1e-7, 'energía J→C');
+});
+prueba('caudales chicos con la tolerancia por defecto (1e-4): el error es relativo al caudal (v25: 10–20 % de error con demandas de ~1 m³/h)', () => {
+  for (const [D, L, dem, H1] of [[26.6, 50, 0.3, 2], [26.6, 50, 0.3, 0.5], [40.9, 100, 1, 3], [26.6, 200, 0.05, 0.6], [102.3, 100, 30, 10]]) {
+    const r = red(`${FL} const A=mkNode('tank',0,0,{label:'A',cota:${H1}}), J=mkNode('junction',0,0,{label:'J',demand:${dem}}), B=mkNode('tank',0,0,{label:'B',cota:0});
+      return {nodes:[A,J,B],arcs:[mkArc('pipe',A.id,J.id,{D_mm:${D},L_m:${L}}), mkArc('pipe',J.id,B.id,{D_mm:${D},L_m:${L}})],fluid:fl};`);
+    const normal = resolver(r, { tol: 1e-4, maxIter: 100 }), fino = resolver(r, { tol: 1e-10, maxIter: 200 });
+    cierto(normal.ok && fino.ok, normal.msg + ' / ' + fino.msg);
+    const Qn = r.arcs.map(a => normal.arcRes[a.id].Q), Qf = r.arcs.map(a => fino.arcRes[a.id].Q);
+    for (let i = 0; i < 2; i++) cercano(Qn[i], Qf[i], 5e-4, `caudal del tramo ${i + 1} (D=${D}, demanda ${dem})`);
+    cercano(Qn[0] - Qn[1], dem, 2e-3, 'balance de masa con la tolerancia por defecto');
+  }
+});
+
+prueba('nodo sin salida (derivación sin consumo): caudal 0 en ella y el resto cierra (v25: «Sistema singular»), también con una válvula muy estrangulada', () => {
+  for (const [K, dem] of [[0, 30], [3, 30], [480, 30], [480, 5]]) {
+    const r = red(`${FL} const A=mkNode('tank',0,0,{label:'A',cota:40}), J=mkNode('junction',0,0,{label:'J',demand:${dem}}), X=mkNode('junction',0,0,{label:'X',cota:10});
+      return {nodes:[A,J,X],arcs:[mkArc('pipe',A.id,J.id,{D_mm:102.3,L_m:100}), mkArc('pipe',J.id,X.id,{D_mm:102.3,L_m:42,customK:${K}})],fluid:fl};`);
+    const s = resolver(r, { tol: 1e-4, maxIter: 100 }); cierto(s.ok, `K=${K}: ${s.msg}`);
+    cercano(s.arcRes[r.arcs[0].id].Q, dem, 5e-4 * dem, 'toda la demanda sale por el tramo de entrada');
+    cercano(s.arcRes[r.arcs[1].id].Q, 0, 1, 'sin caudal hacia el nodo sin salida', 1e-9);
+    cercano(s.nodeRes[r.nodes[2].id].H, s.nodeRes[r.nodes[1].id].H, 1, 'el nodo sin salida queda a la carga de J', 1e-9);
+  }
+});
+prueba('redes generadas que v25 no resolvía o daba por resueltas con una fuga fantasma: ahora convergen y cierran el balance', () => {
+  // semilla 776062: nodo sin salida con válvulas muy estranguladas (v25 «convergía» con 0,35 m³/h entrando a un nodo sin consumo)
+  // semilla 1694666: una iteración intermedia deja todas las retenciones de un nodo cerradas (v25: según el camino, «sistema singular»)
+  // semilla 79190 y 102947: nodos sin salida (v25: «sistema singular»)
+  // semilla 68: bomba que alimenta un nodo sin salida con la retención de su otra entrada cerrada (caudal de la bomba ≈ 0): la pendiente de la
+  //   curva de bomba con Q < 0,5 m³/h estaba mal (v25 la resolvía solo porque se detenía con un residuo absoluto de 1e-4 m³/s)
+  for (const semilla of [776062, 1694666, 79190, 102947, 68]) {
+    const caso = generar(semilla);
+    const fluido = caso.fluid.type === 'water' ? R(`getWaterProps(${caso.fluid.temp})`) : [caso.fluid.rho, caso.fluid.nu];
+    const r = R('JSON.parse(' + JSON.stringify(JSON.stringify({ nodes: caso.nodes, arcs: caso.arcs, fluid: { rho: fluido[0], nu: fluido[1] } })) + ')');
+    const s = resolver(r, { tol: 1e-4, maxIter: 100 }); cierto(s.ok, 'semilla ' + semilla + ': ' + s.msg);
+    for (const n of r.nodes) {
+      if (n.type !== 'junction') continue;
+      let neto = -n.demand, circula = n.demand;
+      for (const a of r.arcs) {
+        const q = s.arcRes[a.id] ? s.arcRes[a.id].Q : s.Q[a.id];
+        if (a.toId === n.id) neto += q; if (a.fromId === n.id) neto -= q; if (a.toId === n.id || a.fromId === n.id) circula += Math.abs(q);
+      }
+      cierto(Math.abs(neto) <= 2e-4 * circula + 1e-6, `semilla ${semilla}, nodo ${n.label}: desbalance ${neto} de ${circula} m³/h`);
+    }
+  }
 });
 
 seccion('Solver: entradas inválidas y casos límite');
@@ -349,17 +531,18 @@ prueba('válvula cerrada que aísla un nodo libre: no hay resultados falsos (sis
   else cierto(/singular|No convergió/.test(s.msg), s.msg);
 });
 
-prueba('HALLAZGO conocido: una válvula de retención (elemento «valve») contra la corriente se bloquea al resolver pero informa un caudal inverso', () => {
-  // En el cálculo la retención no deja pasar flujo inverso (Q=0), pero al armar los resultados solo el tipo «check» antiguo se recorta a cero.
-  // Se conserva el comportamiento del original (ver README, «Hallazgos»). Si algún día se corrige, este test falla a propósito: actualizarlo.
-  const r = red(`${FL} const A=mkNode('tank',0,0,{label:'A',cota:30}), J=mkNode('junction',0,0,{label:'J'}), B=mkNode('tank',0,0,{label:'B',cota:50});
-    const p=mkArc('pipe',A.id,J.id,{D_mm:100,L_m:50}), v=mkArc('valve',J.id,B.id,{valveType:'check', D_mm:100}); return {nodes:[A,J,B],arcs:[p,v],fluid:fl};`);
-  const s = resolver(r); cierto(s.ok, s.msg);
-  cercano(s.arcRes[r.arcs[0].id].Q, 0, 1, 'la tubería no mueve agua', 1e-6);
-  cierto(s.arcRes[r.arcs[1].id].Q < -1, 'la válvula informa un caudal inverso de ' + s.arcRes[r.arcs[1].id].Q + ' m³/h');
-  const t = red(`${FL} const A=mkNode('tank',0,0,{label:'A',cota:30}), J=mkNode('junction',0,0,{label:'J'}), B=mkNode('tank',0,0,{label:'B',cota:50});
-    const p=mkArc('pipe',A.id,J.id,{D_mm:100,L_m:50}), v=mkArc('check',J.id,B.id,{D_mm:100}); return {nodes:[A,J,B],arcs:[p,v],fluid:fl};`);
-  const u = resolver(t); cierto(u.ok, u.msg); igual(u.arcRes[t.arcs[1].id].Q, 0, 'el tipo «check» antiguo sí informa cero');
+prueba('válvula de retención (elemento «valve») contra la corriente: bloquea Y lo informa (caudal 0, balance de masa en el nodo; v25 informaba el caudal inverso)', () => {
+  const armar = tipo => red(`${FL} const A=mkNode('tank',0,0,{label:'A',cota:30}), J=mkNode('junction',0,0,{label:'J'}), B=mkNode('tank',0,0,{label:'B',cota:50});
+    const p=mkArc('pipe',A.id,J.id,{D_mm:100,L_m:50}), v=mkArc(${JSON.stringify(tipo)},J.id,B.id,{valveType:'check', D_mm:100}); return {nodes:[A,J,B],arcs:[p,v],fluid:fl};`);
+  for (const tipo of ['valve', 'check']) {
+    const r = armar(tipo), s = resolver(r); cierto(s.ok, s.msg);
+    cercano(s.arcRes[r.arcs[0].id].Q, 0, 1, 'la tubería no mueve agua', 1e-6);
+    igual(s.arcRes[r.arcs[1].id].Q, 0, tipo + ': caudal informado'); igual(s.arcRes[r.arcs[1].id].V, 0, tipo + ': velocidad informada'); igual(s.arcRes[r.arcs[1].id].hf, 0, tipo + ': hf informada');
+  }
+  // y a favor de la corriente deja pasar, con el mismo caudal que una tubería con ese K
+  const r = red(`${FL} const A=mkNode('tank',0,0,{label:'A',cota:50}), J=mkNode('junction',0,0,{label:'J'}), B=mkNode('tank',0,0,{label:'B',cota:30});
+    return {nodes:[A,J,B],arcs:[mkArc('pipe',A.id,J.id,{D_mm:100,L_m:50}), mkArc('valve',J.id,B.id,{valveType:'check', D_mm:100})],fluid:fl};`);
+  const s = resolver(r); cierto(s.ok, s.msg); cierto(s.arcRes[r.arcs[1].id].Q > 10, 'a favor de la corriente pasa caudal'); cercano(s.arcRes[r.arcs[0].id].Q, s.arcRes[r.arcs[1].id].Q, 1e-7);
 });
 
 seccion('Resultados sobre el modelo');
@@ -414,6 +597,13 @@ prueba('sanitizeArc(): normaliza números, longitudes de arreglos, curvas y rang
   igual(R(`sanitizeArc({id:1, fromId:2, toId:3, type:'valve', open_pct:'abc'}).open_pct`), 100);
   igual(R(`sanitizeArc({id:1, fromId:2, toId:3, type:'pump'}).pumpCurve.length`), 2, 'bomba sin curva: curva por defecto');
 });
+prueba('sanitizeArc(): material solo de la lista; rugosidad y sarro negativos no pasan; ε = 0 (tubo liso) se conserva', () => {
+  const a = x => R(`sanitizeArc(Object.assign({id:1, fromId:2, toId:3, type:'pipe'}, ${x}))`);
+  igual(a("{material:'PVC'}").material, 'PVC'); igual(a("{material:'Cobre'}").material, 'Cobre');
+  igual(a("{material:'<img src=x onerror=alert(1)>'}").material, undefined); igual(a("{material:7}").material, undefined); igual(a("{}").material, undefined);
+  igual(a("{eps_mm:0}").eps_mm, 0, 'ε = 0 es válida'); igual(a("{eps_mm:-0.2}").eps_mm, 0.046, 'ε negativa → acero'); igual(a("{eps_mm:'x'}").eps_mm, 0.046);
+  igual(a("{fouling_mm:-1}").fouling_mm, 0); igual(a("{fouling_mm:0.4}").fouling_mm, 0.4);
+});
 prueba('sanitizeArc(): ids, tipos y estructura hostiles se rechazan', () => {
   for (const x of ['null', '[]', "{id:1, fromId:2, toId:'3', type:'pipe'}", "{id:1, fromId:2, toId:3, type:'pipe\"onclick=\"x'}", "{id:'a', fromId:2, toId:3, type:'pipe'}", '{id:1, fromId:2, toId:3}', '{id:1, fromId:NaN, toId:3, type:"pipe"}'])
     lanza(() => R(`sanitizeArc(${x})`), /arco/, x);
@@ -450,11 +640,10 @@ prueba('40 redes aleatorias (semilla fija): balance de masa en cada nodo libre y
       if (n.type !== 'junction') continue;
       let neto = -n.demand;
       for (const a of ctx.__r.arcs) {
-        let q = s.arcRes[a.id].Q;
-        if (a.type === 'valve' && a.valveType === 'check') q = Math.max(q, 0);   // hallazgo conocido (arriba): el solver bloquea el flujo inverso pero lo informa; se cuenta como lo resolvió
+        const q = s.arcRes[a.id].Q;      // (la retención contra la corriente ya informa 0: sin casos especiales)
         if (a.toId === n.id) neto += q; if (a.fromId === n.id) neto -= q;
       }
-      peorBalance = Math.max(peorBalance, Math.abs(neto)); cierto(Math.abs(neto) < 0.05, 'balance de masa ' + neto + ' m³/h en ' + n.label + ' (semilla ' + semilla + ')');
+      peorBalance = Math.max(peorBalance, Math.abs(neto)); cierto(Math.abs(neto) < 0.005, 'balance de masa ' + neto + ' m³/h en ' + n.label + ' (semilla ' + semilla + ')');
     }
     for (const a of ctx.__r.arcs) { const r = s.arcRes[a.id]; cierto(Number.isFinite(r.Q) && Number.isFinite(r.V) && Number.isFinite(r.hf), 'resultado no finito en el arco ' + a.label + ' (semilla ' + semilla + ')'); }
   }

@@ -11,7 +11,7 @@ function exportExcel() {
   // Hoja 1: Resumen
   const convOk = state.results?.ok;
   const resData = [
-    ['Hydra v25 — Calculadora de Redes Hidráulicas'],
+    [`Hydra ${VERSION_APP} — Calculadora de Redes Hidráulicas`],
     ['Fecha:', new Date().toLocaleDateString('es-AR')],
     [],
     ['Nodos:', state.nodes.length],
@@ -46,18 +46,18 @@ function exportExcel() {
 
   // Hoja 4: BOM
   const fitNames = FITTINGS.map(f => f.name);
-  const bomRows = [['Nombre','Tipo','eps [mm]','D int [mm]','L [m]','K total', ...fitNames, 'Q [m3/h]','V [m/s]','Re','Regimen']];
+  const bomRows = [['Nombre','Tipo','Material','eps [mm]','D int [mm]','L [m]','K total', ...fitNames, 'Q [m3/h]','V [m/s]','Re','Regimen']];
   for (const a of state.arcs) {
     if (a.type==='pipe'||a.type==='check') {
       const Kraw = arcTotalK(a);
       const K = Number.isFinite(Kraw) ? +Kraw.toFixed(3) : 'Cerrada (K=∞)';
       const fQty = FITTINGS.map((_, i) => (a.fitQty || [])[i] || 0);
-      bomRows.push([a.label, a.type, a.eps_mm||0.046, a.D_mm||200, a.L_m||0, K, ...fQty,
+      bomRows.push([a.label, a.type, etiquetaMaterial(a), a.eps_mm ?? EPS_DEFECTO_MM, a.D_mm||200, a.L_m||0, K, ...fQty,
         a.Q!=null?+(+a.Q).toFixed(3):null, a.V!=null?+(+a.V).toFixed(4):null,
         a.Re!=null?Math.round(a.Re):null, a.regime||'-']);
     } else {
       const fQty = FITTINGS.map(() => 0);
-      bomRows.push([a.label, a.type, '-', a.D_mm||'-', '-', '-', ...fQty,
+      bomRows.push([a.label, a.type, '-', '-', a.D_mm||'-', '-', '-', ...fQty,
         a.Q!=null?+(+a.Q).toFixed(3):null, a.V!=null?+(+a.V).toFixed(4):null, '-', a.regime||a.type]);
     }
   }

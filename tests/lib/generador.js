@@ -29,8 +29,8 @@ function generar(semilla) {
   for (let i = 0; i < nJunc; i++) nodes.push({ id: id++, type: 'junction', label: 'J' + (i + 1), x: ent(0, 800), y: ent(0, 500), cota: redondear(u(0, 20), 1), p_bar: 0, demand: rnd() < 0.3 ? 0 : redondear(u(0, 40), 1), H: null, P: null });
 
   const NFIT = 14;
-  const DN = [603.225, 477.9, 454.025, 428, 347.7, 303.2, 254.5, 202.7, 154.1, 128.2, 102.3, 77.9, 62.7, 52.5, 40.9, 26.6];
-  const EPS = [0.015, 0.046, 0.15, 0.0015, 0.0015, 0.26];
+  const DN = [574.65, 477.9, 428.65, 381.0, 333.35, 303.2, 254.5, 202.7, 154.1, 128.2, 102.3, 77.9, 62.7, 52.5, 40.9, 26.6];   // interiores Sch 40 (los de js/datos/tuberias.js)
+  const EPS = [0, 0.015, 0.046, 0.15, 0.0015, 0.0015, 0.26];                                                                    // 0 = tubo liso
   let aid = id;
   const arcs = [];
   function nuevoArco(tipo, de, a) {

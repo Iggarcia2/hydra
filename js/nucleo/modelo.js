@@ -37,7 +37,8 @@ function sanitizeArc(a){
   A.label  = String(A.label ?? '');
   A.D_mm   = Number.isFinite(+A.D_mm) && +A.D_mm>0 ? +A.D_mm : 200;
   A.L_m    = Number.isFinite(+A.L_m) && +A.L_m>=0  ? +A.L_m  : 100;
-  A.eps_mm = Number.isFinite(+A.eps_mm) ? +A.eps_mm : 0.046;
+  A.eps_mm = Number.isFinite(+A.eps_mm) && +A.eps_mm >= 0 ? +A.eps_mm : EPS_DEFECTO_MM;   // [v26] una rugosidad negativa no existe
+  if (!MATERIALS.some(m => m.label === A.material)) delete A.material;           // [v26] material elegido en el panel (solo uno de la lista)
   A.customK= Number.isFinite(+A.customK) ? +A.customK : 0;
   if (!Array.isArray(A.fitQty) || A.fitQty.length !== FITTINGS.length)
     A.fitQty = new Array(FITTINGS.length).fill(0);
@@ -63,6 +64,7 @@ function sanitizeArc(a){
     A.open_pct = Number.isFinite(+A.open_pct) ? Math.min(100, Math.max(0, +A.open_pct)) : 100;
   // [repo] Coerción numérica de lo que llega como texto
   for (const [k, def] of CAMPOS_NUMERICOS_ARCO) if (A[k] != null) A[k] = _num(A[k], def);
+  if (A.fouling_mm != null && A.fouling_mm < 0) A.fouling_mm = 0;                // [v26] sarro negativo: sin sentido físico
   A.fitQty  = A.fitQty.map(q => _num(q, 0) ?? 0);
   A.fitOpen = A.fitOpen.map(q => _num(q, 100) ?? 100);
   if (Array.isArray(A.pumpCurve))  A.pumpCurve  = A.pumpCurve.map(p => _punto(p, 'H'));

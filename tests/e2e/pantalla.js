@@ -357,6 +357,36 @@ prueba('exportar PDF y Excel con etiquetas extremas (5.000 caracteres, comillas,
   });
 });
 
+seccion('Material, diámetro y resultados (v26)');
+prueba('material → rugosidad; diámetro nominal → espesor SCH 40; rugosidad negativa rechazada; el material sale en BOM, ariete y Excel', async () => {
+  await conContexto({}, async ctx => {
+    const p = await abrir(ctx, srv.url + URL_NUEVA);
+    const id = await p.evaluate(() => state.arcs.find(a => a.type === 'pipe').id);
+    const arco = () => p.evaluate(i => { const x = state.arcs.find(a => a.id === i); return { eps: x.eps_mm, mat: x.material, D: x.D_mm, e: x.wall_mm, label: x.label }; }, id);
+    await p.click(`#canvas-root .arc-el[data-id="${id}"]`); await pausa(p, 100);
+    await p.selectOption('#prop-material', 'PVC'); await pausa(p, 60);
+    let a = await arco(); igual(a.eps, 0.0015); igual(a.mat, 'PVC'); igual(await p.locator('#props-content [data-field="eps_mm"]').inputValue(), '0.0015', 'el campo de rugosidad sigue al material');
+    const dn400 = await p.locator('#prop-nps option').evaluateAll(o => { const x = o.find(e => /^DN400/.test(e.textContent)); return x ? x.value : null; });
+    cierto(dn400 !== null, 'la lista de diámetros trae DN400'); await p.selectOption('#prop-nps', dn400); await pausa(p, 60);
+    a = await arco(); igual(a.D, 381, 'DN400 SCH 40: interior de 381 mm (v25: 428 mm, más que su diámetro exterior)'); igual(a.e, 12.7, 'espesor SCH 40 del DN400');
+    await p.locator('#props-content [data-field="eps_mm"]').evaluate(e => { e.value = '-0,3'; e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true })); }); await pausa(p, 100);
+    a = await arco(); igual(a.eps, 0.0015, 'una rugosidad negativa no se acepta'); cierto(await p.locator('#props-content [data-field="eps_mm"]').inputValue() !== '-0,3', 'y el campo vuelve al valor válido');
+    await p.click('button:has-text("▶ Calcular")'); await esperarCalculo(p);
+    cierto(/^Convergió/.test(await p.locator('#solver-status').innerText()), await p.locator('#solver-status').innerText());
+    await p.click('#rtab-bom'); await pausa(p, 100);
+    cierto(/PVC/.test(await p.locator('#bom-content').innerText()), 'el BOM muestra el material PVC');
+    await p.click('#rtab-ariete'); await pausa(p, 100);
+    const ariete = await p.evaluate(() => { const t = document.querySelector('#ariete-content table'); return t ? [...t.rows].map(r => [...r.cells].map(c => c.textContent.trim())) : null; });
+    cierto(ariete && ariete[0][1] === 'Material', 'la tabla de ariete tiene la columna Material');
+    cierto(ariete.slice(1).some(f => f[0] === a.label && f[1] === 'PVC'), 'el tramo T1 figura como PVC en el ariete');
+    const x = await descargar(p, () => p.click('button:has-text("📊 Excel")'));
+    const bom = await p.evaluate(b64 => { const wb = XLSX.read(b64, { type: 'base64' }); return XLSX.utils.sheet_to_json(wb.Sheets['BOM'], { header: 1 }); }, x.buf.toString('base64'));
+    cierto(bom[0].includes('Material'), 'la hoja BOM del Excel tiene la columna Material: ' + bom[0].join(','));
+    cierto(bom.slice(1).some(f => f[0] === a.label && f[2] === 'PVC'), 'y el tramo editado figura como PVC');
+    igual(p.registro.errores.length, 0, p.registro.errores.join(' | '));
+  });
+});
+
 // ── Ejecución ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 (async () => {
   srv = await servir(RAIZ); browser = await lanzar();

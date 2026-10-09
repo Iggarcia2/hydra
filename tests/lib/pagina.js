@@ -90,14 +90,14 @@ async function compararImagenes(browser, pngA, pngB) {
         const g = c.getContext('2d'); g.drawImage(img, 0, 0); return g.getImageData(0, 0, c.width, c.height);
       };
       const A = await leer(a), B = await leer(b);
-      if (A.width !== B.width || A.height !== B.height) return { mismoTamano: false, distintos: -1, difMax: 255 };
+      if (A.width !== B.width || A.height !== B.height) return { mismoTamano: false, distintos: -1, difMax: 255, total: 0 };
       let distintos = 0, difMax = 0;
       for (let i = 0; i < A.data.length; i += 4) {
         let d = 0;
         for (let k = 0; k < 4; k++) d = Math.max(d, Math.abs(A.data[i + k] - B.data[i + k]));
         if (d) { distintos++; if (d > difMax) difMax = d; }
       }
-      return { mismoTamano: true, distintos, difMax };
+      return { mismoTamano: true, distintos, difMax, total: A.width * A.height };
     }, [pngA.toString('base64'), pngB.toString('base64')]);
   } finally { await ctx.close(); }
 }

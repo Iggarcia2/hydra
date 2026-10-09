@@ -22,8 +22,8 @@ function agregar(nombre, codigo, fluido) {
   const fl = { rho: fluido[0], nu: fluido[1] };
   ctx.__r = { nodes: r.nodes, arcs: r.arcs, fluid: fl }; ctx.__o = { tol: 1e-10, maxIter: 300 };
   let s; try { s = evaluar(ctx, 'solveNetwork(__r, __o)', 4000); } catch (e) { if (e.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') return; throw e; }
-  if (!s.ok) { casos.push({ nombre, omitido: s.msg }); return; }
   const red = JSON.parse(JSON.stringify({ nodes: r.nodes, arcs: r.arcs, fluid: fl }));
+  if (!s.ok) { casos.push({ nombre, omitido: s.msg, red }); return; }
   const H = {}, Q = {}, Re = {};
   for (const n of r.nodes) H[n.id] = s.nodeRes[n.id].H;
   for (const a of r.arcs) { Q[a.id] = s.arcRes[a.id].Q; Re[a.id] = s.arcRes[a.id].Re; }
@@ -54,8 +54,25 @@ agregar('anillo con dos tanques y demandas', `const A=mkNode('tank',0,0,{cota:40
 agregar('retención en el sentido del flujo', `const A=mkNode('tank',0,0,{cota:20}), J=mkNode('junction',0,0,{}), B=mkNode('tank',0,0,{cota:2});
   return {nodes:[A,J,B], arcs:[mkArc('check',A.id,J.id,{D_mm:100,L_m:40}), mkArc('pipe',J.id,B.id,{D_mm:100,L_m:60})]};`, AG20);
 
+// Régimen laminar / transición / caudales pequeños / tubo liso (los casos donde v25 se equivocaba)
+agregar('aceite viscoso (laminar) entre tanques', `const A=mkNode('tank',0,0,{cota:12}), J=mkNode('junction',0,0,{}), B=mkNode('tank',0,0,{cota:2});
+  return {nodes:[A,J,B], arcs:[mkArc('pipe',A.id,J.id,{D_mm:102.3,L_m:200,customK:2}), mkArc('pipe',J.id,B.id,{D_mm:77.9,L_m:150})]};`, [900, 4e-4]);
+agregar('fluido muy viscoso (1000 cSt) con bomba y demanda', `const A=mkNode('tank',0,0,{cota:0}), J=mkNode('junction',0,0,{demand:4}), B=mkNode('tank',0,0,{cota:6});
+  const bm=mkArc('pump',A.id,J.id,{pumpCurve:[{Q:0,H:40},{Q:20,H:34},{Q:40,H:24},{Q:60,H:10}]});
+  return {nodes:[A,J,B], arcs:[bm, mkArc('pipe',J.id,B.id,{D_mm:77.9,L_m:100,fitQty:[2,0,0,0,0,0,0,0,0,0,0,0,0,0]})]};`, [950, 1e-3]);
+agregar('transición: aceite 20 cSt, flujo con Re entre 2300 y 4000', `const A=mkNode('tank',0,0,{cota:0.7}), J=mkNode('junction',0,0,{}), B=mkNode('tank',0,0,{cota:0});
+  return {nodes:[A,J,B], arcs:[mkArc('pipe',A.id,J.id,{D_mm:102.3,L_m:50,eps_mm:0.046}), mkArc('pipe',J.id,B.id,{D_mm:102.3,L_m:50,eps_mm:0.046})]};`, [850, 2e-5]);
+agregar('caudal pequeño (≈0,2 m³/h, DN25) en serie', `const A=mkNode('tank',0,0,{cota:1.3}), J=mkNode('junction',0,0,{}), B=mkNode('tank',0,0,{cota:1});
+  return {nodes:[A,J,B], arcs:[mkArc('pipe',A.id,J.id,{D_mm:26.6,L_m:250,eps_mm:0.046}), mkArc('pipe',J.id,B.id,{D_mm:26.6,L_m:250,eps_mm:0.046})]};`, AG20);
+agregar('tubo liso (ε = 0) en serie con tubo de acero', `const A=mkNode('tank',0,0,{cota:25}), J=mkNode('junction',0,0,{}), B=mkNode('tank',0,0,{cota:0});
+  return {nodes:[A,J,B], arcs:[mkArc('pipe',A.id,J.id,{D_mm:154.1,L_m:300,eps_mm:0}), mkArc('pipe',J.id,B.id,{D_mm:154.1,L_m:300,eps_mm:0.046})]};`, AG20);
+agregar('diámetros grandes corregidos (DN400 interior 381 mm) en serie con DN600', `const A=mkNode('tank',0,0,{cota:20}), J=mkNode('junction',0,0,{demand:600}), B=mkNode('tank',0,0,{cota:0});
+  return {nodes:[A,J,B], arcs:[mkArc('pipe',A.id,J.id,{D_mm:381.0,L_m:800}), mkArc('pipe',J.id,B.id,{D_mm:574.65,L_m:1200})]};`, AG20);
+agregar('retención contra la corriente (caudal inverso bloqueado)', `const A=mkNode('tank',0,0,{cota:5}), J=mkNode('junction',0,0,{}), B=mkNode('tank',0,0,{cota:20}), C=mkNode('tank',0,0,{cota:0});
+  return {nodes:[A,J,B,C], arcs:[mkArc('pipe',A.id,J.id,{D_mm:102.3,L_m:50}), mkArc('check',J.id,B.id,{D_mm:102.3,L_m:30}), mkArc('pipe',J.id,C.id,{D_mm:102.3,L_m:60})]};`, AG20);
+
 // ── Pseudoaleatorias: cadenas y árboles con distintos materiales, accesorios, válvulas, bombas y fluidos ──────────────────────
-const DN = [52.5, 77.9, 102.3, 128.2, 154.1, 202.7, 254.5], EPS = [0.015, 0.046, 0.15, 0.0015, 0.26];
+const DN = [52.5, 77.9, 102.3, 128.2, 154.1, 202.7, 254.5, 333.35, 381.0, 428.65, 574.65], EPS = [0, 0.015, 0.046, 0.15, 0.0015, 0.26];
 for (let i = 1; i <= 60; i++) {
   const nJ = ent(1, 6), tipoBomba = elegir(['curve', 'curve', 'fixedQ', 'fixedP', null]);
   const fl = rnd() < 0.75 ? AGUA(ent(5, 90)) : [red2(u(750, 1300)), red2(u(0.8, 12)) * 1e-6];

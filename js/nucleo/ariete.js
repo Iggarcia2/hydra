@@ -18,9 +18,11 @@ function calcArieteTramo(arc, fluid, P_op_bar) {
   const L = arc.L_m || 10;             // m
   const V0 = arc.V != null ? Math.abs(arc.V) : 0;  // m/s
 
-  // Material para E
-  const matLabel = MATERIALS.find(m => Math.abs(m.eps - (arc.eps_mm || 0.046)) < 1e-5)?.label || '';
-  let E = E_YOUNG[matLabel] || E_YOUNG['Acero'];
+  // Módulo de Young del material del tramo. [v26] Antes se buscaba en una tabla con claves que no coincidían con los nombres de los
+  // materiales y TODOS usaban el del acero (200 GPa): para PVC o HDPE la celeridad y la sobrepresión salían sobreestimadas.
+  // Si el material no se puede determinar (proyecto de v25 con ε = 0,0015: PVC, HDPE o cobre) se usa el del acero, del lado conservador.
+  const material = materialDeArco(arc);
+  const E = material ? material.E : E_ACERO;
 
   // Celeridad de onda  a = sqrt(K/ρ) / sqrt(1 + K*D/(E*e))
   const K = K_WATER;
@@ -42,5 +44,5 @@ function calcArieteTramo(arc, fluid, P_op_bar) {
   if (dP > 10e5) risk = '🔴 Alto';
   else if (dP > 5e5) risk = '🟡 Medio';
 
-  return { arc, a, Tc, dP, dH, P_op_bar, P_max_bar, risk, V0 };
+  return { arc, a, Tc, dP, dH, P_op_bar, P_max_bar, risk, V0, material: material ? material.label : null, E };
 }

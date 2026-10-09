@@ -5,10 +5,18 @@
    fluido, proyecto, catálogo, guardar/cargar, exportar a Excel y PDF) y, después de cada paso, compara:
      · el HTML completo de la pantalla (sin <script>), los valores de todos los campos,
      · el estado interno (red, fluido, datos del proyecto, pilas de deshacer, catálogo guardado),
-     · lo dibujado en cada <canvas>,
+     · lo dibujado en cada <canvas> (solo su tamaño),
      · los cuadros de diálogo que aparecieron,
-     · los archivos descargados (nombre, tamaño y huella SHA-256),
+     · los archivos descargados (solo el nombre),
      · una captura de pantalla en los pasos marcados.
+   Desde la v26 el cálculo cambió A PROPÓSITO (criterio de convergencia relativo, ley de fricción continua, diámetros SCH 40 corregidos, material
+   con módulo de Young, etc.; ver README), así que los números de la pantalla ya no coinciden con los de v25: incluso la red de ejemplo da
+   9,761 m en J1 y no 9,756 m (v25 se detenía con un residuo de 1e-4 en m³/s). Por eso, en esta prueba TODO NÚMERO se reemplaza por «#» antes
+   de comparar: lo que tiene que coincidir es la estructura de la pantalla, los textos, las opciones, los avisos, el orden de las filas y el
+   comportamiento de cada control. La exactitud de los números la prueban las pruebas del motor (tests/unit, tests/equivalencia/motor.js y
+   tests/ref). Las diferencias de estructura que son parte del cambio están en ESPERADAS, cada una con su motivo.
+   Las capturas ya no se comparan píxel a píxel (las cifras cambian el dibujo): tienen que ser del mismo tamaño y con menos de un 5 % de píxeles
+   distintos, lo que detecta un diseño roto o un CSS que no cargó.
    Las librerías de internet de la versión original se sirven desde libs/ (mismas copias que usa el sitio nuevo), el reloj y Math.random
    están fijos y las tipografías de internet se descartan en los dos lados.
    Usá:  node tests/equivalencia/pantalla.js        (devuelve código 1 si hay alguna diferencia) */
@@ -17,10 +25,28 @@ const { servir } = require('../lib/servidor.js');
 const { lanzar } = require('../lib/navegador.js');
 const { RAIZ, sha, nuevoContexto, FOTO, descargar, esperarCalculo, compararImagenes } = require('../lib/pagina.js');
 
-/* Las capturas se comparan píxel a píxel. El dibujado de los bordes redondeados de los botones puede variar en ±1 de 255 en un canal
-   entre dos corridas de la MISMA versión (se midió: 11 a 37 píxeles de 1,26 millones); eso no es una diferencia de la pantalla.
-   Cuenta como diferencia cualquier píxel que cambie más que este umbral (de 255), o un tamaño distinto. Lo que queda bajo el umbral se informa. */
-const UMBRAL_PIXEL = 8;
+const MAX_PIXELES_DISTINTOS = 0.05;      // fracción de píxeles de una captura que puede diferir (por las cifras nuevas)
+
+/* Reemplaza los números por «#» (y las huellas SHA y los hashes de los lienzos): ver la cabecera. */
+const NUMERO = /-?\d+(?:[.,]\d+)?(?:e[+-]?\d+)?/gi;
+const normalizar = s => String(s).replace(/[0-9a-f]{64}/g, 'SHA').replace(/(\d+x\d+):[0-9a-f]+/g, '$1:HASH').replace(NUMERO, '#');
+
+/* Diferencias de estructura que son parte de la v26: [clave, patrón que se busca en la versión NUEVA, motivo, reemplazo (por defecto se quita)]. */
+const ESPERADAS = [
+  ['dom', /<th>Tramo<\/th><th>Material<\/th>[\s\S]*?<\/table>/g, 'tabla de ariete: columna nueva «Material» (encabezado y una celda por fila)',
+    tabla => tabla.replace('<th>Material</th>', '').replace(/(<td>[^<]*<\/td>)\s*<td>(?:<span[^>]*>[^<]*<\/span>|[^<]*)<\/td>/g, '$1')],
+  ['dom', /value="(?:Acero [^"]+|PVC|HDPE|Cobre|Fundición gris)"/g, 'las opciones del material llevan su nombre como valor (v25: la rugosidad)', 'value="#"'],
+  ['dom', /<option value="#">PVC — ε # mm<\/option><option value="#">HDPE — ε # mm<\/option>/g, 'PVC y HDPE son dos materiales (v25: «PVC / HDPE», con módulos de Young 4 veces distintos)', '<option value="#">PVC / HDPE — ε # mm</option>'],
+  ['dom', /; al elegir un diámetro nominal se carga el de Sch#\.\s*El módulo de Young sale del material elegido en el tramo; si no está indicado se usa el del acero \(del lado conservador\)\./g, 'nota de la tabla de ariete: espesor de Sch 40 al elegir el diámetro y módulo de Young por material', '.'],
+  ['estado', /,"material":"[^"]*"/g, 'el tramo guarda el material elegido (campo nuevo `material`)'],
+  ['dom', /<div class="tb-badge" id="tb-version">/g, 'la versión de la barra la escribe js/arranque.js desde VERSION_APP (v25 la traía fija en el HTML)', '<div class="tb-badge">'],
+];
+/* El select de material: v25 elegía la opción por la rugosidad (y mostraba «Personalizado» si no coincidía con ninguna) y v26 por el material
+   del tramo; su valor se ignora en los dos lados (lo que se compara es que el control exista y se pueda editar). */
+const IGNORAR = [['valores', /prop-material\|select-one\|[^|\n]*\|/g, 'prop-material|select-one|*|']];
+/* La cantidad de puntos de una curva del sistema no se compara: v26 barre el rango completo aun con un nodo suelto en la red (v25 dejaba la curva
+   corta porque su tolerancia absoluta daba por «convergido» el barrido en el punto de operación); lo que importa es que haya curva. */
+IGNORAR.push(['estado', /(?:\{"Q":#,"H":#\},?)+/g, '{CURVA}']);
 
 // ── Recorrido ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 const idDe = (p, etiqueta) => p.evaluate(l => (state.nodes.concat(state.arcs).find(e => e.label === l) || {}).id, etiqueta);
@@ -274,7 +300,8 @@ async function main() {
   const srv = await servir(RAIZ);
   const browser = await lanzar();
   let diferencias = 0, comparaciones = 0;
-  const capturas = { identicas: 0, ruido: [] };
+  const capturas = { identicas: 0, fracciones: [] };
+  const vistas = new Set();
   try {
     const orig = await correr(browser, srv.url, '/versiones/hydra_v25.html', 'v25', true);
     const nuevo = await correr(browser, srv.url, '/index.html', 'repo', false);
@@ -284,28 +311,35 @@ async function main() {
       for (const k of ['dom', 'valores', 'lienzos', 'estado', 'dialogos', 'extra', 'fallo', 'captura']) {
         if (a[k] === undefined && b[k] === undefined) continue;
         comparaciones++;
-        if (a[k] === b[k]) { if (k === 'captura') capturas.identicas++; continue; }
         if (k === 'captura') {
+          if (a.captura === b.captura) { capturas.identicas++; continue; }
           const c = await compararImagenes(browser, a.png, b.png);
-          if (c.mismoTamano && c.difMax <= UMBRAL_PIXEL) { capturas.ruido.push({ paso: i + 1, distintos: c.distintos, difMax: c.difMax }); continue; }
-          malas.push([k, c.mismoTamano ? c.distintos + ' píxeles distintos, diferencia máxima ' + c.difMax + '/255' : 'tamaños distintos']);
+          const fr = c.mismoTamano ? c.distintos / c.total : 1;
+          capturas.fracciones.push({ paso: i + 1, fr });
+          if (!c.mismoTamano || fr > MAX_PIXELES_DISTINTOS) malas.push([k, c.mismoTamano ? (100 * fr).toFixed(1) + ' % de píxeles distintos' : 'tamaños distintos']);
           continue;
         }
-        malas.push([k, primeraDiferencia(String(a[k]), String(b[k]))]);
+        let x = normalizar(a[k]), y = normalizar(b[k]);
+        for (const [clave, patron, reemplazo] of IGNORAR) if (clave === k) { x = x.replace(patron, reemplazo); y = y.replace(patron, reemplazo); }
+        for (const [clave, patron, , reemplazo] of ESPERADAS) if (clave === k) y = y.replace(patron, reemplazo === undefined ? '' : reemplazo);
+        if (x !== y) malas.push([k, primeraDiferencia(x, y)]);
       }
       if (malas.length) {
         diferencias += malas.length;
         console.log('✗ paso ' + (i + 1) + ' «' + PASOS[i].nombre + '»: difiere ' + malas.map(m => m[0]).join(', '));
-        for (const [k, d] of malas.slice(0, 3)) console.log('    · ' + k + ' — ' + d);
+        for (const [k, d] of malas) {
+          const firma = k + d.replace(/posición \d+/, '');
+          if (vistas.has(firma)) continue;          // la misma diferencia se arrastra a los pasos siguientes: se muestra una sola vez
+          vistas.add(firma); console.log('    · ' + k + ' — ' + d);
+        }
       }
     }
-    console.log('Capturas de pantalla: ' + capturas.identicas + ' idénticas byte a byte' + (capturas.ruido.length
-      ? ' · ' + capturas.ruido.length + ' con ruido de dibujado bajo el umbral de ' + UMBRAL_PIXEL + '/255 (' + capturas.ruido.map(r => 'paso ' + r.paso + ': ' + r.distintos + ' píxeles, máx ' + r.difMax + '/255').join('; ') + ')'
-      : '') + '.');
+    console.log('Capturas de pantalla: ' + capturas.identicas + ' idénticas byte a byte · ' + capturas.fracciones.length + ' con cifras distintas' + (capturas.fracciones.length
+      ? ' (' + capturas.fracciones.map(r => 'paso ' + r.paso + ': ' + (100 * r.fr).toFixed(2) + ' % de píxeles').join('; ') + ')' : '') + '.');
     const huellas = [];
     for (const f of orig.fotos) if (f.extra && f.extra !== 'null') huellas.push(JSON.parse(f.extra).descarga);
     console.log('Pasos: ' + PASOS.length + ' · comparaciones: ' + comparaciones + ' · diferencias: ' + diferencias);
-    console.log('Archivos descargados idénticos: ' + huellas.map(h => h.nombre + ' (' + h.bytes + ' B)').join(', '));
+    console.log('Archivos descargados con el mismo nombre: ' + huellas.map(h => h.nombre).join(', '));
     console.log('Diálogos en el recorrido: ' + orig.fotos.reduce((s, f) => s + (f.dialogos ? f.dialogos.split('\n').length : 0), 0));
     // Consola y errores: tienen que coincidir y, en el sitio nuevo, ser cero salvo lo esperado del propio recorrido (archivo inválido, etc.)
     const cA = JSON.stringify(orig.consola.concat(orig.errores)), cB = JSON.stringify(nuevo.consola.concat(nuevo.errores));

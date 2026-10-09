@@ -92,10 +92,12 @@ function buildPipeGeomSection(arc, full=true) {
   if (!full) {
     return `<div class="prop-sep">Diámetro</div>${dnSelect}${dInteriorInp}`;
   }
+  // [v26] El material se guarda en el tramo (arc.material) porque PVC, HDPE y cobre comparten rugosidad y solo el material define el
+  // módulo de Young del golpe de ariete. Si no se puede determinar (rugosidad a mano, o proyecto de v25 con ε = 0,0015), queda «Personalizado».
+  const matActual = materialDeArco(arc);
   const matOpts = MATERIALS.map(m=>{
-    const curEps = arc.eps_mm!=null ? arc.eps_mm : 0.046;
-    const sel = Math.abs(curEps - m.eps)<1e-5 ? ' selected' : '';
-    return `<option value="${m.eps}"${sel}>${m.label} — ε ${m.eps} mm</option>`;
+    const sel = matActual && matActual.label === m.label ? ' selected' : '';
+    return `<option value="${esc(m.label)}"${sel}>${m.label} — ε ${m.eps} mm</option>`;
   }).join('');
   return `
     <div class="prop-sep">Geometría del caño</div>
@@ -264,7 +266,8 @@ function renderArcProps(panel, arc) {
         // Ahora: acepta coma o punto; si no es válido o pisa un piso físico, revierte lo
         // mostrado al valor ya guardado y NO toca el dato.
         const parsed = parseLocaleFloat(el.value);
-        const belowMin = (f==='D_mm' && parsed<=0) || (f==='nPumps' && parsed<1);
+        // [v26] ε, sarro y longitud negativos no tienen sentido físico (una longitud negativa bloqueaba el tramo en silencio).
+        const belowMin = (f==='D_mm' && parsed<=0) || (f==='nPumps' && parsed<1) || ((f==='eps_mm' || f==='fouling_mm' || f==='L_m') && parsed<0);
         const outOfPct = (f==='open_pct' && (parsed<0 || parsed>100)); // [v21] % apertura valvula: 0-100
         if (!Number.isFinite(parsed) || belowMin || outOfPct) { el.value = (arc[f] ?? ''); return; }
         v = parsed;
@@ -320,13 +323,19 @@ function renderArcProps(panel, arc) {
   const npsEl = panel.querySelector('#prop-nps');
   if (npsEl) npsEl.addEventListener('change', () => {
     const d = parseFloat(npsEl.value);
-    if (d > 0) { arc.D_mm=d; const di=panel.querySelector('[data-field="D_mm"]'); if(di) di.value=d.toFixed(1); renderNetwork(); }
+    if (d > 0) {
+      arc.D_mm=d; const di=panel.querySelector('[data-field="D_mm"]'); if(di) di.value=d.toFixed(1);
+      // [v26] El espesor sigue al diámetro nominal (SCH 40). Con el 5 mm fijo de v25, un DN600 daba una celeridad del golpe de ariete ~25 % baja.
+      const dn = DN_LIST.find(x => x.D === d);
+      if (dn && dn.t) { arc.wall_mm = dn.t; const wi=panel.querySelector('[data-field="wall_mm"]'); if(wi) wi.value=dn.t.toFixed(2); }
+      renderNetwork();
+    }
   });
   // Material → eps_mm
   const matEl = panel.querySelector('#prop-material');
   if (matEl) matEl.addEventListener('change', () => {
-    const eps = parseFloat(matEl.value);
-    if (!isNaN(eps)&&eps>=0) { arc.eps_mm=eps; const ei=panel.querySelector('[data-field="eps_mm"]'); if(ei) ei.value=eps.toFixed(4); renderNetwork(); }
+    const mat = MATERIALS.find(m => m.label === matEl.value);
+    if (mat) { arc.eps_mm=mat.eps; arc.material=mat.label; const ei=panel.querySelector('[data-field="eps_mm"]'); if(ei) ei.value=mat.eps.toFixed(4); renderNetwork(); }
   });
 
   // [v13] refresca el K total mostrado (tabla de accesorios + resumen) tras cambiar cantidad o % apertura

@@ -114,8 +114,9 @@ function renderBOM() {
 
   for (const arc of state.arcs) {
     if (arc.type === 'pipe' || arc.type === 'check') {
-      const key = `D${arc.D_mm}_e${arc.eps_mm}`;
-      if (!pipeGroups[key]) pipeGroups[key] = { D_mm: arc.D_mm, eps_mm: arc.eps_mm, totalL: 0, count: 0 };
+      const mat = etiquetaMaterial(arc);   // [v26] PVC, HDPE y cobre comparten rugosidad: se agrupa y se rotula por material
+      const key = `D${arc.D_mm}_e${arc.eps_mm}_${mat}`;
+      if (!pipeGroups[key]) pipeGroups[key] = { D_mm: arc.D_mm, eps_mm: arc.eps_mm, mat, totalL: 0, count: 0 };
       pipeGroups[key].totalL += arc.L_m || 0;
       pipeGroups[key].count++;
     } else if (arc.type === 'pump')  pumpList.push(arc);
@@ -123,7 +124,6 @@ function renderBOM() {
     else if (arc.type === 'equip') equipList.push(arc);
   }
 
-  const matName = eps => (MATERIALS.find(m => Math.abs(m.eps - eps) < 1e-5)?.label || `ε=${eps} mm`);
   const dnLabel = D  => (DN_LIST.find(d => d.D && Math.abs(d.D - D) < 0.5)?.label || `${D} mm`);
   const fittingsDetail = arc => {
     if (!arc.fitQty) return '—';
@@ -150,7 +150,7 @@ function renderBOM() {
     html += `<tr><td colspan="5" style="color:var(--faint);text-align:center;padding:12px">Sin tuberías en la red</td></tr>`;
   } else {
     for (const g of pipeVals) {
-      html += `<tr><td>${dnLabel(g.D_mm)}</td><td>${matName(g.eps_mm)}</td>
+      html += `<tr><td>${dnLabel(g.D_mm)}</td><td>${esc(g.mat)}</td>
         <td class="num">${g.eps_mm}</td><td class="num">${g.totalL.toFixed(1)}</td><td class="num">${g.count}</td></tr>`;
     }
   }
@@ -251,7 +251,7 @@ function calcAriete() {
     Celeridad calculada con fluido actual (ρ=${fluid.rho.toFixed(0)} kg/m³, K≈${(K_WATER/1e9).toFixed(1)} GPa) y material de la tubería.
   </div>
   <table class="res"><thead><tr>
-    <th>Tramo</th><th class="num">V₀ [m/s]</th><th class="num">a [m/s]</th>
+    <th>Tramo</th><th>Material</th><th class="num">V₀ [m/s]</th><th class="num">a [m/s]</th>
     <th class="num">Tc [s]</th><th class="num">ΔP [bar]</th><th class="num">ΔH [m]</th>
     <th class="num">P máx [bar]</th><th>Riesgo</th>
   </tr></thead><tbody>`;
@@ -259,6 +259,7 @@ function calcAriete() {
   for (const r of rows) {
     html += `<tr>
       <td>${esc(r.arc.label)}</td>
+      <td>${r.material ? esc(r.material) : '<span title="Elegí el material en las propiedades del tramo">sin indicar (E acero)</span>'}</td>
       <td class="num">${r.V0.toFixed(3)}</td>
       <td class="num">${r.a.toFixed(0)}</td>
       <td class="num">${r.Tc.toFixed(2)}</td>
@@ -271,7 +272,8 @@ function calcAriete() {
   html += `</tbody></table>
   <div style="margin-top:8px;font-size:10px;color:var(--faint)">
     Para tuberías sin espesor de pared definido se usa e ≈ 6% × D (aprox. Sch40/SDR17).
-    Podés definir el espesor exacto en las propiedades del tramo (<i>Espesor pared [mm]</i>).
+    Podés definir el espesor exacto en las propiedades del tramo (<i>Espesor pared [mm]</i>); al elegir un diámetro nominal se carga el de Sch40.
+    El módulo de Young sale del material elegido en el tramo; si no está indicado se usa el del acero (del lado conservador).
   </div>`;
 
   container.innerHTML = html;
