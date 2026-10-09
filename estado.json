@@ -1,14 +1,14 @@
 {
   "proyecto": "hydra",
-  "version": "1.1.0",
-  "version_aplicacion": "v26",
+  "version": "1.1.1",
+  "version_aplicacion": "v26.1",
   "fecha": "2026-10-06",
   "archivo_principal": "index.html",
   "ultima_version_archivada": "versiones/hydra_v25.html",
   "verificacion": {
-    "unitarias_motor": "69 OK",
+    "unitarias_motor": "70 OK",
     "contraste_python": "74 redes comparadas OK (turbulentas: carga <= 1.04e-8 m, caudal relativo <= 2.75e-9; transicion y laminar <= 1.25e-9 m)",
-    "pantalla_e2e": "24 OK",
+    "pantalla_e2e": "25 OK",
     "equivalencia_motor_v25": "150 redes: 429 comparaciones exactas y 2927 de pipeCalc sin diferencias; solver con tolerancia fina: 59 comparadas (<= 4.2e-7 m), 34 que solo resuelve el motor nuevo, 0 que v25 resolvia y el nuevo no",
     "equivalencia_pantalla_v25": "106 pasos, 749 comparaciones, 0 diferencias (numeros enmascarados; 2 capturas identicas y 5 con cifras distintas, <= 0.69 % de pixeles)",
     "robustez_ui_por_defecto": "300 redes aleatorias (tol 1e-4, 100 iter): v26 resuelve 198, v25 144; la unica que v25 daba por resuelta y v26 no tiene una bomba a contraflujo (error explicito)",
@@ -66,6 +66,11 @@
       "id": 10,
       "titulo": "Definir la licencia del codigo propio",
       "estado": "pendiente"
+    },
+    {
+      "id": 11,
+      "titulo": "Corregir la lectura de la curva H-Q / P-Q con coma decimal (panel de la bomba y catalogo)",
+      "estado": "hecha"
     }
   ]
 }

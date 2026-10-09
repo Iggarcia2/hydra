@@ -1,6 +1,6 @@
 {
   "name": "hydra",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Hydra: calculadora de redes hidráulicas (Newton-Raphson, Colebrook-White, bombas, ariete) con editor en pantalla. Sitio estático.",
   "scripts": {

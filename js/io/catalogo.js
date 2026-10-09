@@ -81,27 +81,23 @@ function deletePumpFromCatalog(idx) {
   renderCatalogList();
 }
 
-function parsePumpTable(text) {
-  return text.trim().split('\n')
-    .map(l => l.trim().split(/[\t\s,;]+/).map(Number))
-    .filter(r => r.length >= 2 && r.every(v => isFinite(v)))
-    .map(r => ({ Q: r[0], H: r[1] }));
-}
-
-function parsePowerTable(text) {
-  return text.trim().split('\n')
-    .map(l => l.trim().split(/[\t\s,;]+/).map(Number))
-    .filter(r => r.length >= 2 && r.every(v => isFinite(v)))
-    .map(r => ({ Q: r[0], P: r[1] }));
+// [v26.1] Las tablas se leen con parsearTablaCurva (la coma es decimal: en v25 «7,5  60,8» se guardaba como Q=7, H=5 y las filas ilegibles se
+// descartaban sin avisar). Devuelve los puntos, o null si alguna fila no se entiende (ya avisó con alert).
+function leerTablaCatalogo(text, clave, nombre) {
+  const r = parsearTablaCurva(text, clave);
+  if (r.errores.length) { alert(`${nombre}: ${r.errores.length > 1 ? 'las filas' : 'la fila'} ${r.errores.slice(0, 5).join(', ')} no se entiende${r.errores.length > 1 ? 'n' : ''} (se esperan dos números; la coma es decimal).`); return null; }
+  return r.puntos;
 }
 
 function savePumpToCatalog() {
   const maker = document.getElementById('cat-maker').value.trim();
   const model = document.getElementById('cat-model').value.trim();
   if (!maker || !model) { alert('Ingresá fabricante y modelo.'); return; }
-  const curve = parsePumpTable(document.getElementById('cat-hq').value);
+  const curve = leerTablaCatalogo(document.getElementById('cat-hq').value, 'H', 'Curva H-Q');
+  if (!curve) return;
   if (curve.length < 2) { alert('La curva H-Q necesita al menos 2 puntos.'); return; }
-  const powerCurve = parsePowerTable(document.getElementById('cat-pq').value);
+  const powerCurve = leerTablaCatalogo(document.getElementById('cat-pq').value, 'P', 'Curva P-Q');
+  if (!powerCurve) return;
   const stock = +document.getElementById('cat-stock').value || 0;
   const notes = document.getElementById('cat-pump-notes').value.trim();
 

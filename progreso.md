@@ -19,3 +19,11 @@
 **Cómo se comprobó.** 69 unitarias; contraste con Python en 74 redes (carga ≤ 1,04e-8 m en turbulentas); 24 pruebas de pantalla; comparación con v25 del motor (150 redes, 0 diferencias exactas en lo no tocado, 34 redes que ahora se resuelven y ninguna perdida) y de la pantalla (números enmascarados, solo las diferencias esperadas de la v26). Con los valores por defecto de la pantalla, en 300 redes aleatorias el motor nuevo resuelve 198 y v25 144. Hallazgos en el camino: la prueba larga encontró dos errores de bombas que el criterio nuevo dejaba a la vista (pendiente de la curva con Q < 0,5 m³/h y signo del Jacobiano con caudal inverso), ya corregidos.
 
 **Qué sigue.** Subir a GitHub (reemplazando la 1.0.0 si ya estaba subida); elegir la referencia de las curvas de válvulas; cotejar el resto de las constantes de criterio; definir la licencia.
+
+## 2026-10-09 · versión 1.1.1 (Hydra v26.1: curva de la bomba con coma decimal)
+
+**Qué se hizo.** El usuario mostró un gráfico H-Q con la curva de la bomba en serrucho. La causa era la lectura del cuadro de texto de la curva (y del catálogo), que viene de v25: separaba columnas también con la coma, así que «7,5  60,8» quedaba como Q=7, H=5 (los valles del gráfico estaban todos en H=5) y el punto de operación se calculaba con esa curva. Se reemplazó por `parsearTablaCurva()` (motor, sin DOM): la coma es decimal, las columnas van con tabulación, espacio o «;», y una fila ilegible o ambigua se informa debajo del cuadro con su número sin pisar la curva guardada. Antes de esto se había arreglado el aviso «No se pudo cargar js/nucleo/materiales.js»: la copia que el usuario abría tenía el `index.html` nuevo sin el archivo nuevo (la 1.1.0 no se había podido escribir en su carpeta).
+
+**Cómo se comprobó.** 70 unitarias (una nueva con la tabla de la curva), 25 de pantalla (una nueva: se escribe la curva con coma decimal, se calcula, se escribe un texto ilegible y se ve el aviso y la curva intacta; también la lectura del catálogo) y la corrida completa con la comparación contra v25 sin diferencias.
+
+**Qué sigue.** Igual que en la 1.1.0; además, un proyecto guardado con la curva dañada se corrige a mano.

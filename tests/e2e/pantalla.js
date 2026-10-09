@@ -10,7 +10,7 @@ const fs = require('fs'), os = require('os'), path = require('path');
 const { servir } = require('../lib/servidor.js');
 const { lanzar } = require('../lib/navegador.js');
 const { RAIZ, nuevoContexto, descargar, esperarCalculo } = require('../lib/pagina.js');
-const { seccion, prueba, cierto, igual, correr } = require('../lib/mini.js');
+const { seccion, prueba, cierto, igual, igualJSON, correr } = require('../lib/mini.js');
 
 let srv, browser;
 const URL_NUEVA = '/index.html', URL_V25 = '/versiones/hydra_v25.html';
@@ -383,6 +383,37 @@ prueba('material → rugosidad; diámetro nominal → espesor SCH 40; rugosidad 
     const bom = await p.evaluate(b64 => { const wb = XLSX.read(b64, { type: 'base64' }); return XLSX.utils.sheet_to_json(wb.Sheets['BOM'], { header: 1 }); }, x.buf.toString('base64'));
     cierto(bom[0].includes('Material'), 'la hoja BOM del Excel tiene la columna Material: ' + bom[0].join(','));
     cierto(bom.slice(1).some(f => f[0] === a.label && f[2] === 'PVC'), 'y el tramo editado figura como PVC');
+    igual(p.registro.errores.length, 0, p.registro.errores.join(' | '));
+  });
+});
+
+seccion('Curva de la bomba con coma decimal (v26.1)');
+prueba('la curva H-Q escrita con coma decimal se guarda bien (v25: «7,5  60,8» quedaba como Q=7, H=5); un texto ilegible avisa y no pisa la curva guardada', async () => {
+  await conContexto({}, async ctx => {
+    const p = await abrir(ctx, srv.url + URL_NUEVA);
+    const id = await p.evaluate(() => state.arcs.find(a => a.type === 'pump').id);
+    const curva = () => p.evaluate(i => state.arcs.find(a => a.id === i).pumpCurve, id);
+    const escribir = txt => p.locator('#props-content [data-field="pumpCurve"]').evaluate((e, t) => { e.value = t; e.dispatchEvent(new Event('change', { bubbles: true })); }, txt);
+    await p.evaluate(i => document.querySelector(`#canvas-root .arc-el[data-id="${i}"]`).dispatchEvent(new MouseEvent('click', { bubbles: true })), id); await pausa(p, 100);   // (el centro del símbolo de la bomba no recibe el clic del mouse: se dispara el mismo evento que atiende la aplicación)
+    await escribir('0\t62,5\n25,5\t60,2\n50\t52\n75,5\t38,4\n100\t18'); await pausa(p, 100);
+    igualJSON(await curva(), [{ Q: 0, H: 62.5 }, { Q: 25.5, H: 60.2 }, { Q: 50, H: 52 }, { Q: 75.5, H: 38.4 }, { Q: 100, H: 18 }], 'los decimales con coma quedan como decimales');
+    igual(await p.locator('#props-content .prop-curve-err').count(), 0, 'sin aviso con una curva válida');
+    await p.click('button:has-text("▶ Calcular")'); await esperarCalculo(p);
+    cierto(/^Convergió/.test(await p.locator('#solver-status').innerText()), await p.locator('#solver-status').innerText());
+    const curvaGuardada = await curva();
+    await escribir('0\t62,5\n7,5\n10 x\n1 2 3'); await pausa(p, 100);
+    const aviso = await p.locator('#props-content .prop-curve-err').innerText();
+    cierto(/Filas 2, 3, 4/.test(aviso), 'el aviso nombra las filas: ' + aviso);
+    cierto(await p.locator('#props-content [data-field="pumpCurve"]').evaluate(e => e.classList.contains('invalid')), 'el cuadro queda marcado');
+    igualJSON(await curva(), curvaGuardada, 'la curva guardada no cambia con un texto ilegible');
+    await escribir('0 62,5\n100 18'); await pausa(p, 100);
+    igual(await p.locator('#props-content .prop-curve-err').count(), 0, 'el aviso desaparece al escribir algo válido');
+    igualJSON(await curva(), [{ Q: 0, H: 62.5 }, { Q: 100, H: 18 }]);
+    // catálogo: la misma lectura
+    const tabla = t => p.evaluate(x => leerTablaCatalogo(x, 'H', 'Curva H-Q'), t);
+    igualJSON(await tabla('0 45,5\n100 40'), [{ Q: 0, H: 45.5 }, { Q: 100, H: 40 }]);
+    igual(await tabla('0 45\n7,5'), null, 'una fila ilegible en el catálogo no se descarta en silencio');
+    igual(p.registro.dialogos.length, 1, p.registro.dialogos.join(' | ')); cierto(/fila 2/.test(p.registro.dialogos[0]), p.registro.dialogos[0]);
     igual(p.registro.errores.length, 0, p.registro.errores.join(' | '));
   });
 });

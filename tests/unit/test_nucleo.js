@@ -68,6 +68,15 @@ prueba('parseLocaleFloat(): coma, punto, miles en ambos formatos, vacíos y basu
   for (const e of ['', '   ', 'abc', 'Infinity', '-Infinity', 'NaN', '--']) igual(R(`parseLocaleFloat(${JSON.stringify(e)})`), NaN, JSON.stringify(e));
   igual(R('parseLocaleFloat(null)'), NaN); igual(R('parseLocaleFloat(undefined)'), NaN);
 });
+prueba('parsearTablaCurva(): la coma es decimal (v25 leía «7,5  60,8» como Q=7, H=5), separadores tab/;/espacios, filas ilegibles señaladas', () => {
+  const P = (t, k = 'H') => JSON.parse(R(`JSON.stringify(parsearTablaCurva(${JSON.stringify(t)}, ${JSON.stringify(k)}))`));
+  igualJSON(P('0\t62\n7,5\t61,5\n15\t61\n22,5\t60,2').puntos, [{ Q: 0, H: 62 }, { Q: 7.5, H: 61.5 }, { Q: 15, H: 61 }, { Q: 22.5, H: 60.2 }]);
+  igualJSON(P('0;62\r\n7,5;61,5').puntos, [{ Q: 0, H: 62 }, { Q: 7.5, H: 61.5 }], 'planilla en español: «;» entre columnas y coma decimal');
+  igualJSON(P('0 62\n\n  7.5   60.8  \n1.234,5 3').puntos, [{ Q: 0, H: 62 }, { Q: 7.5, H: 60.8 }, { Q: 1234.5, H: 3 }], 'punto decimal, filas en blanco y miles');
+  igualJSON(P('0 10\n5 4', 'P').puntos, [{ Q: 0, P: 10 }, { Q: 5, P: 4 }], 'la clave del segundo valor es la pedida');
+  igualJSON(P('0 62\n7,5\n10 x\n1 2 3\n-1 5\n3 NaN\n0 0\n20 50'), { puntos: [{ Q: 0, H: 62 }, { Q: 20, H: 50 }], errores: [2, 3, 4, 5, 6] }, 'una fila con un solo valor (ambigua), texto, tres columnas, negativos o NaN es error; (0; 0) se ignora');
+  igualJSON(P('').puntos, []); igualJSON(P('  \n ').errores, []);
+});
 prueba('fmtK(): número con 2 decimales y texto legible para K infinito', () => {
   igual(R('fmtK(1.234)'), '1.23'); igual(R('fmtK(0)'), '0.00'); igual(R('fmtK(Infinity)'), '∞ (cerrada)');
 });

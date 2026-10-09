@@ -291,31 +291,39 @@ function renderArcProps(panel, arc) {
   // con una captura real (Tipo=Mariposa sin campo de apertura visible).
   const valveTypeEl = panel.querySelector('[data-field="valveType"]');
   if (valveTypeEl) valveTypeEl.addEventListener('change', () => renderArcProps(panel, arc));
+  // [v26.1] Curvas H-Q y P-Q: la coma es decimal (ver parsearTablaCurva; en v25 «7,5  60,8» se guardaba como Q=7, H=5) y un texto que no se
+  // entiende NO se guarda en silencio: al salir del cuadro se avisa debajo y la curva guardada queda como estaba. Mientras se escribe solo se
+  // guarda lo que ya es válido (sin avisar a mitad de una fila).
+  const avisoCurva = (cuadro, msg) => {
+    let el = cuadro.nextElementSibling && cuadro.nextElementSibling.classList.contains('prop-curve-err') ? cuadro.nextElementSibling : null;
+    if (!msg) { if (el) el.remove(); cuadro.classList.remove('invalid'); return; }
+    if (!el) { el = document.createElement('div'); el.className = 'prop-curve-err'; cuadro.insertAdjacentElement('afterend', el); }
+    el.textContent = msg; cuadro.classList.add('invalid');
+  };
+  // Devuelve los puntos si el texto es válido (y quita el aviso), o null (y, si avisar, lo muestra).
+  const leerCurva = (cuadro, clave, puedeEstarVacia, avisar) => {
+    const r = parsearTablaCurva(cuadro.value, clave);
+    let msg = '';
+    if (r.errores.length)
+      msg = (r.errores.length > 1 ? 'Filas ' : 'Fila ') + r.errores.slice(0, 5).join(', ') + (r.errores.length > 5 ? '…' : '') +
+            ': se esperan dos números (Q y ' + clave + ') separados por tabulación, espacio o «;»; la coma es decimal.';
+    else if (r.puntos.length < 2 && !(puedeEstarVacia && r.puntos.length === 0)) msg = 'Hacen falta al menos 2 puntos.';
+    if (!msg || avisar) avisoCurva(cuadro, msg);
+    return msg ? null : r.puntos;
+  };
   const ta = panel.querySelector('[data-field="pumpCurve"]');
   if (ta) {
     let _deb1;
-    const parseHQ = () => {
-      const rows = ta.value.trim().split('\n').map(r=>{
-        const parts=r.split(/[\t,;\s]+/);
-        return {Q:+parts[0]||0, H:+parts[1]||0};
-      }).filter(p=>p.Q>=0&&p.H>=0&&(p.Q>0||p.H>0));
-      if (rows.length>=2) arc.pumpCurve=rows;
-    };
-    ta.addEventListener('input',  ()=>{ clearTimeout(_deb1); _deb1=setTimeout(parseHQ,600); });
-    ta.addEventListener('change', parseHQ);
+    const parseHQ = avisar => { const p = leerCurva(ta, 'H', false, avisar); if (p) arc.pumpCurve = p; };
+    ta.addEventListener('input',  ()=>{ clearTimeout(_deb1); _deb1=setTimeout(()=>parseHQ(false),600); });
+    ta.addEventListener('change', ()=>parseHQ(true));
   }
   const taP = panel.querySelector('[data-field="powerCurve"]');
   if (taP) {
     let _deb2;
-    const parsePQ = () => {
-      const rows = taP.value.trim().split('\n').map(r=>{
-        const parts=r.split(/[\t,;\s]+/);
-        return {Q:+parts[0]||0, P:+parts[1]||0};
-      }).filter(p=>p.Q>=0&&p.P>=0&&(p.Q>0||p.P>0));
-      arc.powerCurve = rows.length>=2 ? rows : [];
-    };
-    taP.addEventListener('input',  ()=>{ clearTimeout(_deb2); _deb2=setTimeout(parsePQ,600); });
-    taP.addEventListener('change', parsePQ);
+    const parsePQ = avisar => { const p = leerCurva(taP, 'P', true, avisar); if (p) arc.powerCurve = p; };
+    taP.addEventListener('input',  ()=>{ clearTimeout(_deb2); _deb2=setTimeout(()=>parsePQ(false),600); });
+    taP.addEventListener('change', ()=>parsePQ(true));
   }
 
   // Fittings quantity inputs

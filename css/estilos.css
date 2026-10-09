@@ -273,6 +273,8 @@ table.res th.num, .num{text-align:center;font-variant-numeric:tabular-nums}
   color:var(--text);font-family:var(--mono);font-size:10px;padding:5px 8px;
   resize:vertical;min-height:70px;outline:none;margin-top:4px}
 .prop-curve:focus{border-color:var(--teal)}
+.prop-curve.invalid{border-color:var(--red)}
+.prop-curve-err{font-size:9px;color:var(--red);margin-top:3px;line-height:1.4}
 /* Sidebar list items overrides */
 .sb-list-item{background:var(--bg3);border:1px solid var(--border);border-radius:4px;
   padding:6px 9px;margin-bottom:4px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:all .12s}

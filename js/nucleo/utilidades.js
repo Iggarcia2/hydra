@@ -30,5 +30,23 @@ function parseLocaleFloat(raw) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+// [v26.1] Texto de una tabla de curva (una fila por punto: «Q  valor», para H-Q o P-Q) → puntos {Q, [clave]: valor}.
+// Separadores de columna: tabulación, punto y coma o espacios; la COMA ES DECIMAL («7,5  60,8»; también «7,5;60,8» de una planilla en español).
+// Una fila con un solo valor («50,30», «7,5») es ambigua (¿dos columnas o un decimal?) y se rechaza. En v25 la coma separaba columnas siempre, así que
+// «7,5  60,8» se leía como Q = 7 y H = 5, y una fila ilegible se guardaba como 0 sin avisar: la curva de la bomba (y el punto de operación) salían mal.
+// Devuelve {puntos, errores}: errores lista los números de fila (desde 1) que no son exactamente dos números finitos y no negativos.
+// Las filas en blanco y las (0; 0) se ignoran.
+function parsearTablaCurva(texto, clave) {
+  const puntos = [], errores = [];
+  String(texto ?? '').split(/\r?\n/).forEach((fila, i) => {
+    if (fila.trim() === '') return;
+    const celdas = fila.trim().split(/[\t;\s]+/);
+    const v = celdas.map(parseLocaleFloat);
+    if (celdas.length !== 2 || !v.every(x => Number.isFinite(x) && x >= 0)) { errores.push(i + 1); return; }
+    if (v[0] > 0 || v[1] > 0) puntos.push({ Q: v[0], [clave]: v[1] });
+  });
+  return { puntos, errores };
+}
+
 // Formatea un K para UI/reportes (Infinity → texto legible en vez de "Infinity").
 function fmtK(v) { return Number.isFinite(v) ? v.toFixed(2) : '∞ (cerrada)'; }
