@@ -188,10 +188,12 @@
         <div>
           <label>Etiquetas en nodos</label>
           <select id="node-label" onchange="renderNetwork()">
-            <option value="name" selected>Nombre</option>
+            <option value="name">Nombre</option>
+            <option value="nameP" selected>Nombre + P manómetro [bar]</option>
+            <option value="P">P manómetro [bar]</option>
+            <option value="Ppiezo">P piezométrica [bar]</option>
             <option value="H">Cabeza H [m]</option>
-            <option value="P">Presión P [bar]</option>
-            <option value="both">Nombre + H</option>
+            <option value="both">Nombre + H [m]</option>
           </select>
         </div>
       </div>

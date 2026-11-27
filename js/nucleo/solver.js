@@ -296,31 +296,42 @@ function solveNetwork(red, opc) {
   const pvPa = (Number.isFinite(+fluid.pv_pa) && +fluid.pv_pa >= 0) ? +fluid.pv_pa : 2339;
   const patmPa = (typeof P_ATM_PA !== 'undefined') ? P_ATM_PA : 101325;
 
-  // Primero calculamos resultados de arcos para conocer las velocidades incidentes en cada nodo (para presión estática real P_est)
+  // Calculamos resultados de arcos y registramos la velocidad representativa de cañería en cada nodo para la lectura real de manómetro.
+  // Un manómetro se instala sobre la tubería que acomete al nodo (pipe / check / valve); solo si un nodo une únicamente equipos/bombas
+  // sin cañería propia se recurre como respaldo a la velocidad de boquilla. Si confluyen varias cañerías con flujo, se pondera V² por |Q|.
   const arcRes = {};
-  const maxVelByNode = {};
+  const pipeVhSum = {}, pipeQSum = {}, fallbackVelByNode = {};
+  const _addPipeVel = (nid, qAbs, v) => {
+    pipeVhSum[nid] = (pipeVhSum[nid] || 0) + qAbs * (v * v / (2 * G));
+    pipeQSum[nid]  = (pipeQSum[nid]  || 0) + qAbs;
+  };
   for (const arc of arcs) {
     const Hi = H[arc.fromId], Hj = H[arc.toId];
     const Qa = Q[arc.id] || 0;
+    const qAbs = Math.abs(Qa);
     let V = 0, Re = 0, f = 0, hf = 0, hf_major = 0, hm_minor = 0, velHead = 0, regime = '—';
     if (arc.type !== 'pump') {
       let dH = Hi - Hj;
       if (arc.type === 'equip') {
         const _D = (arc.D_mm || 200) / 1000, _A = Math.PI * _D * _D / 4;
-        V = Math.abs(Qa / 3600) / _A;
+        V = (qAbs / 3600) / _A;
         velHead = V * V / (2 * G);
         hf = dH; hm_minor = dH; hf_major = 0; regime = 'Equipo';
         arcRes[arc.id] = { Q: Qa, V, Re: 0, f: 0, hf, hf_major, hm_minor, velHead, regime };
+        if (qAbs > 1e-9) {
+          fallbackVelByNode[arc.fromId] = Math.max(fallbackVelByNode[arc.fromId] || 0, V);
+          fallbackVelByNode[arc.toId]   = Math.max(fallbackVelByNode[arc.toId]   || 0, V);
+        }
       } else {
         if (esRetencion(arc) && dH < 0) dH = 0;
         const r = pipeCalc(dH, arc, fluid);
         V = r.V; Re = r.Re; f = r.f; hf = r.hf;
         hf_major = r.hf_major; hm_minor = r.hm_minor; velHead = r.velHead; regime = r.regime;
         arcRes[arc.id] = { Q: Qa, V, Re, f, hf, hf_major, hm_minor, velHead, regime };
-      }
-      if (Math.abs(Qa) > 1e-9) {
-        maxVelByNode[arc.fromId] = Math.max(maxVelByNode[arc.fromId] || 0, V);
-        maxVelByNode[arc.toId]   = Math.max(maxVelByNode[arc.toId]   || 0, V);
+        if (qAbs > 1e-9) {
+          _addPipeVel(arc.fromId, qAbs, V);
+          _addPipeVel(arc.toId,   qAbs, V);
+        }
       }
     } else {
       const D = arc.D_mm / 1000, A = Math.PI * D * D / 4;
@@ -356,7 +367,7 @@ function solveNetwork(red, opc) {
     }
   }
 
-  // Presiones nodales: P piezométrica [bar] y P_est estática real de manómetro [bar] (descontando V²/2g en nodos Junction)
+  // Presiones nodales: P piezométrica [bar] y P_est estática real de manómetro [bar] (descontando la altura cinética V²/2g de la cañería en el nodo)
   const nodeRes = {};
   const cavNodes = [];
   for (const n of nodes) {
@@ -365,8 +376,15 @@ function solveNetwork(red, opc) {
       nodeRes[n.id] = { H: undefined, P: null, P_est: null, velHead: 0, cavitation: false };
       continue;
     }
-    const vNode = n.type === 'junction' ? (maxVelByNode[n.id] || 0) : 0;
-    const vh = vNode * vNode / (2 * G);
+    let vh = 0;
+    if (n.type === 'junction') {
+      if ((pipeQSum[n.id] || 0) > 1e-9) {
+        vh = pipeVhSum[n.id] / pipeQSum[n.id];
+      } else {
+        const vf = fallbackVelByNode[n.id] || 0;
+        vh = vf * vf / (2 * G);
+      }
+    }
     const P_piezo = (hVal - (n.cota || 0)) * fluid.rho * G / 1e5;
     const P_static = (hVal - (n.cota || 0) - vh) * fluid.rho * G / 1e5;
     const pAbsPa = patmPa + P_static * 1e5;

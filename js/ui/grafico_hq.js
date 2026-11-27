@@ -69,46 +69,65 @@ function renderHQChart() {
     ctx.fillText('Calculá la red para ver la curva del sistema', W/2, H/2); return;
   }
 
-  // Compute global axis ranges from all visible pumps
-  let maxQ = 0, maxH = 0, maxPwr = 0;
+  // Escala estilo catálogo de fabricante (ej. Grundfos): si hay curva de bomba, el techo del eje H lo manda la curva de la bomba
+  // y el punto de operación (no el extremo extrapolado de la parábola del sistema, que aplastaría visualmente la curva de la bomba),
+  // y se admiten cargas del sistema negativas cuando la succión empuja a favor (sin recortarlas en H = 0).
+  let maxQ = 0, maxH = 0, minH = 0, maxPwr = 0;
+  let hasAnyOwnCurve = false;
   plotData.forEach(({pump, ownCurve, sysCurve, qop, hop}) => {
     const nP = pump.nPumps || 1;
     if (ownCurve && ownCurve.length) {
-      maxQ = Math.max(maxQ, ownCurve[ownCurve.length-1].Q);
+      hasAnyOwnCurve = true;
+      maxQ = Math.max(maxQ, ownCurve[ownCurve.length - 1].Q);
       maxH = Math.max(maxH, ...ownCurve.map(p => p.H));
     }
-    if (sysCurve.length) {
-      maxQ = Math.max(maxQ, ...sysCurve.map(p => p.Q));
-      maxH = Math.max(maxH, ...sysCurve.map(p => p.H));
-    }
     if (qop != null) maxQ = Math.max(maxQ, qop);
-    if (hop != null) maxH = Math.max(maxH, hop);
+    if (hop != null) { maxH = Math.max(maxH, hop); minH = Math.min(minH, hop); }
+    if (sysCurve.length) {
+      minH = Math.min(minH, ...sysCurve.map(p => p.H));
+      if (!hasAnyOwnCurve) {
+        maxQ = Math.max(maxQ, ...sysCurve.map(p => p.Q));
+        maxH = Math.max(maxH, ...sysCurve.map(p => p.H));
+      }
+    }
     if (pump.powerCurve && pump.powerCurve.length >= 2)
       maxPwr = Math.max(maxPwr, ...pump.powerCurve.map(p => p.P * nP));
   });
   if (maxQ <= 0) maxQ = 1;
   if (maxH <= 0) maxH = 1;
-  maxQ *= 1.1; maxH *= 1.25;
+  maxQ *= 1.08;
+  maxH *= 1.18;
+  minH = minH < 0 ? minH * 1.15 : 0;
+  const spanH = Math.max(maxH - minH, 1);
   const hasPwr = pumpsToShow.length === 1 && maxPwr > 0;
   maxPwr = hasPwr ? maxPwr * 1.2 : 0;
 
-  const pad = {l:38, r: hasPwr ? 44 : 16, t:16, b:28};
-  const px = q => pad.l + (q / maxQ) * (W - pad.l - pad.r);
-  const py = h => pad.t + (1 - h / maxH) * (H - pad.t - pad.b);
+  const pad = {l:42, r: hasPwr ? 46 : 18, t:16, b:28};
+  const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
+  const px = q => pad.l + (q / maxQ) * plotW;
+  const py = h => pad.t + ((maxH - h) / spanH) * plotH;
 
   // Grid
   ctx.strokeStyle = '#27272a'; ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
-    const y = pad.t + i * (H - pad.t - pad.b) / 4;
+    const y = pad.t + i * plotH / 4;
+    const hVal = maxH - spanH * (i / 4);
     ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
-    ctx.fillStyle = '#52525b'; ctx.font = '9px IBM Plex Mono'; ctx.textAlign = 'right';
-    ctx.fillText((maxH * (1 - i/4)).toFixed(0), pad.l - 3, y + 3);
+    ctx.fillStyle = '#71717a'; ctx.font = '9px IBM Plex Mono'; ctx.textAlign = 'right';
+    ctx.fillText(hVal.toFixed(Math.abs(spanH) < 15 ? 1 : 0), pad.l - 4, y + 3);
+  }
+  if (minH < 0) {
+    const y0 = py(0);
+    ctx.strokeStyle = '#52525b'; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
+    ctx.beginPath(); ctx.moveTo(pad.l, y0); ctx.lineTo(W - pad.r, y0); ctx.stroke();
+    ctx.setLineDash([]);
   }
   for (let i = 0; i <= 4; i++) {
-    const x = pad.l + i * (W - pad.l - pad.r) / 4;
+    const x = pad.l + i * plotW / 4;
+    ctx.strokeStyle = '#27272a'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, H - pad.b); ctx.stroke();
-    ctx.fillStyle = '#52525b'; ctx.font = '9px IBM Plex Mono'; ctx.textAlign = 'center';
-    ctx.fillText((maxQ * i/4).toFixed(0), x, H - pad.b + 12);
+    ctx.fillStyle = '#71717a'; ctx.font = '9px IBM Plex Mono'; ctx.textAlign = 'center';
+    ctx.fillText((maxQ * i / 4).toFixed(0), x, H - pad.b + 12);
   }
 
   // Q_required vertical line
@@ -129,17 +148,14 @@ function renderHQChart() {
   plotData.forEach(({pump, ownCurve, sysCurve, qop, hop}, idx) => {
     const color = PUMP_COLORS[idx % PUMP_COLORS.length];
 
-    // [v18] Curva de sistema real (numérica, la misma que arma el PDF) — antes acá se dibujaba
-    // una aproximación analítica; ahora es la curva de verdad, para los tres modos de bomba.
+    // Curva de sistema real recortada limpiamente al área de trazado (sin deformar la escala de la bomba)
     if (sysCurve.length >= 2) {
-      ctx.strokeStyle = color + '55'; ctx.lineWidth = 1.5; ctx.setLineDash([4,3]); ctx.beginPath();
-      let started = false;
-      sysCurve.forEach(p => {
-        const yc = py(Math.max(p.H, 0));
-        started ? ctx.lineTo(px(p.Q), yc) : ctx.moveTo(px(p.Q), yc);
-        started = true;
-      });
+      ctx.save();
+      ctx.beginPath(); ctx.rect(pad.l, pad.t, plotW, plotH); ctx.clip();
+      ctx.strokeStyle = color + '88'; ctx.lineWidth = 1.6; ctx.setLineDash([4, 3]); ctx.beginPath();
+      sysCurve.forEach((p, si) => si === 0 ? ctx.moveTo(px(p.Q), py(p.H)) : ctx.lineTo(px(p.Q), py(p.H)));
       ctx.stroke(); ctx.setLineDash([]);
+      ctx.restore();
     }
 
     // Curva propia de catálogo — solo existe en modo curva

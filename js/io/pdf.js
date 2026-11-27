@@ -212,13 +212,17 @@ function exportPDF() {
       styles: { fontSize: 7.5, cellPadding: 1.5, font: 'helvetica', textColor: ink },
       headStyles: { fillColor: lightFill, textColor: steel, fontStyle: 'bold', lineWidth: 0.1, lineColor: borderGray },
       alternateRowStyles: { fillColor: altRow },
-      head: [['ID','Nombre','Tipo','Cota [m]','H [m]','P [bar]','Demanda [m3/h]']],
-      body: state.nodes.map(n => [
-        n.id, n.label, n.type, (n.cota??0).toFixed(1),
-        n.H!=null?(+n.H).toFixed(2):'-',
-        n.P!=null?(+n.P).toFixed(3):'-',
-        (n.demand||0).toFixed(1)
-      ]),
+      head: [['ID','Nombre','Tipo','Cota [m]','H [m]','P piezo [bar]','P manom. [bar]','Demanda [m3/h]']],
+      body: state.nodes.map(n => {
+        const pEst = n.P_est ?? n.P;
+        return [
+          n.id, n.label, n.type, (n.cota??0).toFixed(1),
+          n.H!=null?(+n.H).toFixed(2):'-',
+          n.P!=null?(+n.P).toFixed(3):'-',
+          pEst!=null?(+pEst).toFixed(3):'-',
+          (n.demand||0).toFixed(1)
+        ];
+      }),
     });
     y = doc.lastAutoTable.finalY + 6;
   }
@@ -234,16 +238,19 @@ function exportPDF() {
       styles: { fontSize: 7, cellPadding: 1.5, font: 'helvetica', textColor: ink },
       headStyles: { fillColor: lightFill, textColor: steel, fontStyle: 'bold', lineWidth: 0.1, lineColor: borderGray },
       alternateRowStyles: { fillColor: altRow },
-      head: [['Nombre','Tipo','Diámetro','De -> A','Q [m3/h]','V [m/s]','dH [m]','Re','Regimen']],
+      head: [['Nombre','Tipo','Diámetro','De -> A','Q [m3/h]','V [m/s]','hf [m]','hm [m]','dH [m]','Re','Regimen']],
       body: state.arcs.map(a => {
         const fr=findNode(a.fromId), t=findNode(a.toId);
+        const isP = a.type==='pump';
         return [
           a.label, a.type, dnLbl(a.D_mm),
           `${fr?.label||'?'} -> ${t?.label||'?'}`,
           a.Q!=null?Math.abs(+a.Q).toFixed(1):'-',
           a.V!=null?(+a.V).toFixed(2):'-',
+          !isP&&a.hf_major!=null?(+a.hf_major).toFixed(2):'-',
+          !isP&&a.hm_minor!=null?(+a.hm_minor).toFixed(2):'-',
           a.hf!=null?(+a.hf).toFixed(2):'-',
-          a.Re!=null?Math.round(a.Re).toLocaleString():'-',
+          !isP&&a.Re?Math.round(a.Re).toLocaleString():'-',
           a.regime||'-',
         ];
       }),
@@ -410,34 +417,44 @@ function renderPumpSystemChartCanvas(pump, sysCurvePts) {
     ctx.scale(scale, scale);
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,Wc,Hc);
 
-    const allQ = curve.map(p=>p.Q).concat(sysPts.map(p=>p.Q)).concat(qop!=null?[qop]:[]);
-    const allH = curve.map(p=>p.H).concat(sysPts.map(p=>p.H)).concat(hop!=null?[hop]:[]);
-    const maxQ = Math.max(...allQ, 1) * 1.05;
-    const maxH = Math.max(...allH, 1) * 1.15;
+    const curveQ = curve.map(p=>p.Q).concat(qop!=null?[qop]:[]);
+    const curveH = curve.map(p=>p.H).concat(hop!=null?[hop]:[]);
+    const allQ = curve.length ? curveQ : sysPts.map(p=>p.Q).concat(qop!=null?[qop]:[]);
+    const allH = curve.length ? curveH : sysPts.map(p=>p.H).concat(hop!=null?[hop]:[]);
+    const maxQ = Math.max(...allQ, 1) * 1.08;
+    const maxH = Math.max(...allH, 1) * 1.18;
+    const minH0 = Math.min(0, ...sysPts.map(p=>p.H), hop!=null?hop:0);
+    const minH = minH0 < 0 ? minH0 * 1.15 : 0;
+    const spanH = Math.max(maxH - minH, 1);
 
-    const pad = {l:36, r:14, t:12, b:26};
-    const px = q => pad.l + (q/maxQ)*(Wc-pad.l-pad.r);
-    const py = h => pad.t + (1-Math.max(h,0)/maxH)*(Hc-pad.t-pad.b);
+    const pad = {l:38, r:14, t:12, b:26};
+    const plotW = Wc - pad.l - pad.r, plotH = Hc - pad.t - pad.b;
+    const px = q => pad.l + (q/maxQ)*plotW;
+    const py = h => pad.t + ((maxH - h)/spanH)*plotH;
 
     ctx.strokeStyle = '#e1e0d9'; ctx.lineWidth = 1; ctx.font = '10px Helvetica';
     for (let i=0;i<=4;i++){
-      const yy = pad.t + i*(Hc-pad.t-pad.b)/4;
+      const yy = pad.t + i*plotH/4;
+      const hv = maxH - spanH*(i/4);
       ctx.beginPath(); ctx.moveTo(pad.l,yy); ctx.lineTo(Wc-pad.r,yy); ctx.stroke();
-      ctx.fillStyle='#898781'; ctx.textAlign='right'; ctx.fillText((maxH*(1-i/4)).toFixed(0), pad.l-4, yy+3);
+      ctx.fillStyle='#898781'; ctx.textAlign='right'; ctx.fillText(hv.toFixed(0), pad.l-4, yy+3);
     }
     for (let i=0;i<=4;i++){
-      const xx = pad.l + i*(Wc-pad.l-pad.r)/4;
+      const xx = pad.l + i*plotW/4;
       ctx.beginPath(); ctx.moveTo(xx,pad.t); ctx.lineTo(xx,Hc-pad.b); ctx.stroke();
       ctx.fillStyle='#898781'; ctx.textAlign='center'; ctx.fillText((maxQ*i/4).toFixed(0), xx, Hc-pad.b+13);
     }
     ctx.fillStyle='#5F5E5A'; ctx.textAlign='center';
-    ctx.fillText('Q [m³/h]', pad.l+(Wc-pad.l-pad.r)/2, Hc-4);
-    ctx.save(); ctx.translate(11,pad.t+(Hc-pad.t-pad.b)/2); ctx.rotate(-Math.PI/2); ctx.fillText('H [m]',0,0); ctx.restore();
+    ctx.fillText('Q [m³/h]', pad.l+plotW/2, Hc-4);
+    ctx.save(); ctx.translate(11,pad.t+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillText('H [m]',0,0); ctx.restore();
 
     if (sysPts.length>=2) {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(pad.l, pad.t, plotW, plotH); ctx.clip();
       ctx.strokeStyle = '#993C1D'; ctx.lineWidth = 2; ctx.beginPath();
       sysPts.forEach((p,i)=> i===0?ctx.moveTo(px(p.Q),py(p.H)):ctx.lineTo(px(p.Q),py(p.H)));
       ctx.stroke();
+      ctx.restore();
     }
     if (curve.length) {
       ctx.strokeStyle = '#185FA5'; ctx.lineWidth = 2; ctx.beginPath();

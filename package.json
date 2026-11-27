@@ -1,8 +1,8 @@
 {
   "name": "hydra",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
-  "description": "Hydra v27: calculadora de redes hidráulicas de alta precisión (Newton-Raphson, Colebrook-White, Crane TP 410, ANSI/HI 9.6.7, NPSHa, Joukowsky).",
+  "description": "Hydra v27.1: calculadora de redes hidráulicas de alta precisión (Newton-Raphson, Colebrook-White, Crane TP 410, ANSI/HI 9.6.7, presión real de manómetro, NPSHa, Joukowsky).",
   "scripts": {
     "test": "node tests/correr_todo.js",
     "test:pantalla": "node tests/correr_todo.js --e2e",

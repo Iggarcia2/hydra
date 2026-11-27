@@ -39,7 +39,7 @@ function renderSidebarLists() {
            onclick="selectElement(${n.id});renderNetwork();renderProps();showSBPane('props')">
         <div class="el-icon" style="background:${NODE_COLORS[n.type]||'#60a5fa'}22;color:${NODE_COLORS[n.type]||'#60a5fa'}">⬤</div>
         <div class="el-info"><div class="el-label">${esc(n.label)}</div><div class="el-sub">${esc(n.type)}</div></div>
-        <div class="el-result">${n.H!==null&&n.H!==undefined?(+n.H).toFixed(1)+' m':''}</div>
+        <div class="el-result">${(n.P_est ?? n.P)!==null&&(n.P_est ?? n.P)!==undefined?(+(n.P_est ?? n.P)).toFixed(2)+' bar':''}</div>
       </div>`).join('');
   if (al) al.innerHTML = state.arcs.length === 0
     ? '<div class="empty-msg">Sin arcos.</div>'

@@ -250,16 +250,25 @@ function renderNetwork() {
     }
 
     const lblMode = document.getElementById('node-label').value;
+    const pManom = node.P_est ?? node.P;
+    const pColor = node.cavitation ? '#f87171' : color;
     let lbl = node.label;
     let sublbl = '';
-    if (lblMode==='H' && node.H!==null) lbl = `${(node.H||0).toFixed(1)}m`;
-    else if (lblMode==='P' && node.P!==null) lbl = `${(node.P||0).toFixed(2)}bar`;
-    else if (lblMode==='both') { lbl=node.label; sublbl=node.H!==null?`${(node.H||0).toFixed(1)}m`:''; }
-    g += `<text x="${pos.x}" y="${pos.y-R-5}" text-anchor="middle" fill="${color}"
+    if (lblMode === 'H' && node.H !== null) lbl = `${(+node.H || 0).toFixed(2)} m`;
+    else if (lblMode === 'P' && pManom !== null && pManom !== undefined) lbl = `${(+pManom).toFixed(2)} bar`;
+    else if (lblMode === 'Ppiezo' && node.P !== null && node.P !== undefined) lbl = `${(+node.P).toFixed(2)} bar`;
+    else if (lblMode === 'nameP') {
+      lbl = node.label;
+      sublbl = (pManom !== null && pManom !== undefined) ? `${(+pManom).toFixed(2)} bar${node.cavitation ? ' ⚠' : ''}` : '';
+    } else if (lblMode === 'both') {
+      lbl = node.label;
+      sublbl = node.H !== null && node.H !== undefined ? `${(+node.H).toFixed(2)} m` : '';
+    }
+    g += `<text x="${pos.x}" y="${pos.y - R - 5}" text-anchor="middle" fill="${pColor}"
       font-size="10" font-family="IBM Plex Mono" font-weight="500">${esc(lbl)}</text>`;
     if (sublbl)
-      g += `<text x="${pos.x}" y="${pos.y-R-15}" text-anchor="middle" fill="${color}"
-        font-size="9" font-family="IBM Plex Mono" opacity=".75">${sublbl}</text>`;
+      g += `<text x="${pos.x}" y="${pos.y - R - 16}" text-anchor="middle" fill="${pColor}"
+        font-size="9.5" font-family="IBM Plex Mono" font-weight="600" opacity=".9">${esc(sublbl)}</text>`;
 
     g += '</g>';
     root.innerHTML += g;
