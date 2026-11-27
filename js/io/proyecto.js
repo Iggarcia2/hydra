@@ -40,10 +40,13 @@ function saveProject() {
     version: 1, name,
     savedAt: new Date().toISOString(),
     fluid: {
-      rho: fluid.rho, nu: fluid.nu, q_required: fluid.q_required||0,
-      type: document.getElementById('fluid-type')?.value || 'water', // [v16]
-      temp: +document.getElementById('fluid-temp')?.value || 20,      // [v16]
-      customName: fluid.customName || '',                             // [v16]
+      rho: fluid.rho, nu: fluid.nu, pv_pa: fluid.pv_pa || 2339, bulk_pa: fluid.bulk_pa || K_WATER,
+      q_required: fluid.q_required || 0,
+      type: document.getElementById('fluid-type')?.value || 'water',
+      temp: +document.getElementById('fluid-temp')?.value || 20,
+      customName: fluid.customName || '',
+      rhoMode: fluid.rhoMode || 'rho',
+      viscMode: fluid.viscMode || 'nu_cst',
     },
     projectMeta: {...projectMeta},
     nodes: state.nodes,
@@ -89,12 +92,17 @@ function loadProject(inputEl) {
         // formulario. Proyectos guardados antes de la v16 no traen "type": se deja el panel como
         // estaba (mismo comportamiento que hasta la v15) para no arriesgar una inferencia
         // equivocada que pise un ρ/ν personalizado real.
-        if (data.fluid.type === 'water' || data.fluid.type === 'custom') {   // [repo] antes cualquier valor «verdadero»
+        const fType = data.fluid.type;
+        if (fType === 'water' || fType === 'custom' || getFluidPreset(fType)) {
+          _populateFluidPresetsSelect();
           const typeEl=document.getElementById('fluid-type'), tempEl=document.getElementById('fluid-temp'),
                 rhoEl=document.getElementById('fluid-rho'), nuEl=document.getElementById('fluid-nu'),
-                nameEl=document.getElementById('fluid-name');
-          if (typeEl) typeEl.value = data.fluid.type;
+                nameEl=document.getElementById('fluid-name'),
+                rhoModeEl=document.getElementById('fluid-rho-mode'), viscModeEl=document.getElementById('fluid-visc-mode');
+          if (typeEl) typeEl.value = fType;
           if (tempEl && data.fluid.temp!=null) tempEl.value = data.fluid.temp;
+          if (rhoModeEl) rhoModeEl.value = 'rho';
+          if (viscModeEl) viscModeEl.value = 'nu_cst';
           if (rhoEl) rhoEl.value = fluid.rho;
           if (nuEl) nuEl.value = +(fluid.nu*1e6).toFixed(4);
           if (nameEl) nameEl.value = fluid.customName;

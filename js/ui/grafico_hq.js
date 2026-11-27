@@ -52,8 +52,9 @@ function renderHQChart() {
   const plotData = pumpsToShow.map(pump => {
     const nP = pump.nPumps || 1;
     const mode = pump.pumpMode || 'curve';
-    const ownCurve = mode === 'curve' && pump.pumpCurve && pump.pumpCurve.length >= 2
-      ? [...pump.pumpCurve].sort((a,b) => a.Q - b.Q).map(p => ({Q: p.Q * nP, H: p.H}))
+    const effPts = mode === 'curve' ? effectivePumpCurve(pump, fluid) : null;
+    const ownCurve = effPts && effPts.length >= 2
+      ? effPts.map(p => ({Q: p.Q * nP, H: p.H}))
       : null;
     const sysCurve = (_sysCurveCache[pump.id] || []).filter(p => Number.isFinite(p.H));
     const qop = pump.Q  != null ? Math.abs(pump.Q) : null;

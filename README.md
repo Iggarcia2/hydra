@@ -4,7 +4,7 @@ Editor en pantalla y solver de redes de tuberías: tanques, nodos con demanda, t
 
 Es un **sitio estático**: no hay servidor, ni compilación, ni internet en uso (las librerías y tipografías están en `libs/`). Se puede abrir con doble clic en `index.html` o publicar tal cual en GitHub Pages.
 
-Versión de la aplicación: **v26.1**. Versión del repositorio: **1.1.1**. La 1.0.0 fue la v25 pasada a sitio estático sin tocar ningún cálculo; la 1.1.0 corrige el motor para que los valores sean realistas y la 1.1.1 corrige la lectura de la curva de la bomba escrita con coma decimal (ver «Cambios de cálculo en v26»).
+Versión de la aplicación: **v27**. Versión del repositorio: **1.2.0**. La 1.0.0 fue la v25 pasada a sitio estático sin tocar ningún cálculo; la 1.1.0/1.1.1 corrigió la convergencia y fricción continua; la **1.2.0 (v27)** eleva la precisión hidráulica y termodinámica con el método **Crane TP 410** ($K = L_e/D \cdot f_T(D)$), derateo viscoso de bombas **ANSI/HI 9.6.7**, escala de potencia por densidad, modelo cuadrático $K_v$ para equipos, separación de nivel líquido y presión de gas en tanques, biblioteca de fluidos de bibliografía, presión estática real descontando $V^2/(2g)$, $\text{NPSH}_a$ y alerta de cavitación.
 
 ## Estructura
 
@@ -138,3 +138,14 @@ Los cinco primeros hallazgos de v25 (retención, módulo de Young, fluidos visco
 ## Licencias de terceros
 
 jsPDF (MIT), jsPDF-AutoTable (MIT), SheetJS Community Edition (Apache-2.0), IBM Plex (SIL OFL 1.1): textos en `libs/`. La licencia del propio código del repositorio está **por definir**.
+
+
+## Cambios de precisión hidráulica en v27 (1.2.0)
+
+1. **Accesorios por método Crane TP 410 (`K = Le/D · fT(D)`):** codos, tees, válvulas de compuerta, globo, esfera, mariposa y retención escalan su coeficiente $K$ con el factor de fricción en turbulencia completa del diámetro comercial (`craneFt(D_mm)`), reduciendo el error frente a bibliografía de ~30–58 % a `< 0,5 %`. Se suman `Salida a tanque (K = 1,00)`, `Entrada abocinada (K = 0,04)`, `kSuddenExpansion` y `kSuddenContraction`, más modo opcional `K constante clásico` para compatibilidad histórica.
+2. **Curvas K-vs-apertura calibradas:** se reemplazaron las curvas orientativas de compuerta y esfera por valores publicados (Crane TP 410 / Mott Tabla 10.4).
+3. **Modelo físico cuadrático `Kv` en Equipos (`equip`):** `dp_bar` representa la pérdida nominal en agua ($\rho_{\text{ref}} = 998,2\text{ kg/m}^3$) a caudal nominal `q_nom_m3h` (o $V = 2\text{ m/s}$), dando $\Delta H_{\text{eq}}$ geométrico independiente de $\rho$ y sin umbral artificial en $Q = 0$. Subir la densidad del fluido ya no incrementa falsamente el caudal de las bombas.
+4. **Bombas: escala de potencia por densidad y derateo por viscosidad ANSI/HI 9.6.7:** `pumpPower()` escala por $\rho / \rho_{\text{ref}}$ (eliminando eficiencias $> 100\%$ en fluidos pesados) y, cuando $\nu > 1,5\text{ cSt}$, aplica los factores $B, C_Q, C_H, C_\eta$ de **ANSI/HI 9.6.7**. Calcula además $\text{NPSH}_a$ en la succión.
+5. **Tanques con nivel líquido y presión de gas separados (`level_m` + `p_bar`):** $H = z + h_{\text{líq}} + P_{\text{gas}}/(\rho g)$.
+6. **Presión estática real de manómetro (`P_est`), alerta de cavitación y corrección en Golpe de Ariete:** los nodos informan tanto presión piezométrica como presión estática descontando $V^2/(2g)$, avisan si $P_{\text{abs}} \le P_v$, y el golpe de ariete conserva el signo negativo de presiones en depresión.
+7. **Biblioteca de 19 fluidos de parciales y series de tubería (Sch 40, Sch 80, Cobre Tipo L):** incluye aceites SAE, glicerina, metanol, etanol, hidrocarburos, glicol y mercurio (Mott, Çengel y White), con entrada directa en $\rho / SG / \gamma$ y $\nu / \mu$ ($\text{Pa}\cdot\text{s}$ o $\text{cP}$).

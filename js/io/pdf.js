@@ -153,11 +153,11 @@ function exportPDF() {
   const maxIter = document.getElementById('solver-maxiter')?.value || 100;
   const metodoLines = [
     `Fluido: ${fluidDesc}`,
-    `Pérdida de carga por fricción: ecuación de Colebrook-White (régimen turbulento, Re > 2300) / Hagen-Poiseuille (régimen laminar, Re < 2300).`,
-    `Pérdidas localizadas: coeficiente de resistencia K por accesorio (codos, tees, válvulas, incluyendo % de apertura en válvulas manuales).`,
-    `Resolución de la red: balance de masa y energía por nodo mediante solver Newton-Raphson con Jacobiano analítico. Tolerancia de convergencia ${tol}, máximo ${maxIter} iteraciones.`,
+    `Pérdida de carga primaria: ecuación de Colebrook-White (turbulento, Re ≥ 4000) / transición continua / Hagen-Poiseuille exacta (laminar, Re < 2300).`,
+    `Pérdidas menores: método Crane TP 410 (K = Le/D · fT(D)) en codos, tees y válvulas, más curvas K-apertura calibradas.`,
+    `Bombas y equipos: escala de potencia por densidad (ρ/ρ_ref), corrección viscosa ANSI/HI 9.6.7 (si ν > 1.5 cSt), modelo cuadrático Kv en equipos y cálculo de NPSHa.`,
+    `Resolución de la red: balance de masa y energía por nodo mediante solver Newton-Raphson con Jacobiano analítico. Tolerancia ${tol}, máx. ${maxIter} iteraciones.`,
     `Resultado de esta corrida: ${convStr}.`,
-    `Hipótesis: régimen permanente, fluido incompresible, propiedades del fluido uniformes en toda la red.`,
   ];
   metodoLines.forEach(line => {
     const wrapped = doc.splitTextToSize('•  ' + line, W - margin*2);
@@ -391,12 +391,13 @@ function renderPumpSystemChartCanvas(pump, sysCurvePts) {
     // sistema con el punto resultante marcado y su valor anotado al lado.
     const mode = pump.pumpMode || 'curve';
     const nP_ = pump.nPumps||1;
-    const curve = mode==='curve' && pump.pumpCurve && pump.pumpCurve.length>=2
-      ? [...pump.pumpCurve].sort((a,b)=>a.Q-b.Q).map(p=>({Q:p.Q*nP_, H:p.H}))
+    const effPts = mode==='curve' ? effectivePumpCurve(pump, fluid) : null;
+    const curve = effPts && effPts.length>=2
+      ? effPts.map(p=>({Q:p.Q*nP_, H:p.H}))
       : [];
     const sysPts = (sysCurvePts||[]).filter(p=>Number.isFinite(p.H));
     const qop = pump.Q!=null ? Math.abs(pump.Q) : null;
-    const hop = pump.hf!=null ? pump.hf : (qop!=null && mode==='curve' ? pumpHead(qop/nP_, pump) : null);
+    const hop = pump.hf!=null ? pump.hf : (qop!=null && mode==='curve' ? pumpHead(qop/nP_, pump, fluid) : null);
 
     if (!curve.length && sysPts.length<2 && (qop==null || hop==null)) return null; // nada que graficar
 

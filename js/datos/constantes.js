@@ -1,6 +1,8 @@
 // js/datos/constantes.js
 'use strict';
-/* Constantes físicas. */
+/* Constantes físicas globales del motor. */
 
-const G = 9.81;   // aceleración de la gravedad [m/s²]
-const VERSION_APP = 'v26.1';   // versión de la aplicación: la usan la barra superior, el título de la pestaña, el PDF y el Excel
+const G = 9.81;                // aceleración gravitatoria estándar de ingeniería [m/s²]
+const RHO_REF_AGUA = 998.2;    // densidad de referencia (agua a 20 °C) [kg/m³] para curvas P-Q de catálogo y ΔP nominal de equipos
+const P_ATM_PA = 101325;       // presión atmosférica estándar [Pa] (1,01325 bar) para cavitación y NPSHa
+const VERSION_APP = 'v27';     // versión de la aplicación: barra superior, pestaña, PDF y Excel

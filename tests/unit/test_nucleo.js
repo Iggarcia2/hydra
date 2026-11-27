@@ -82,16 +82,19 @@ prueba('fmtK(): número con 2 decimales y texto legible para K infinito', () => 
 });
 
 seccion('Propiedades del agua');
-prueba('getWaterProps(): valores de la tabla, interpolación lineal y topes', () => {
+prueba('getWaterProps(): valores de la tabla (0–100 °C, pico en 4 °C), interpolación lineal, topes y presión de vapor', () => {
   igualJSON(R('getWaterProps(20)'), [998.2, 1.004e-6]);
-  const m = R('getWaterProps(22.5)');                       // punto medio entre 20 y 25 °C
+  igualJSON(R('getWaterProps(4)'), [1000.0, 1.567e-6]);
+  const m = R('getWaterProps(22.5)');
   cercano(m[0], (998.2 + 997.0) / 2, 1e-12); cercano(m[1], (1.004e-6 + 0.893e-6) / 2, 1e-12);
-  igualJSON(R('getWaterProps(-10)'), [999.9, 1.518e-6]); igualJSON(R('getWaterProps(200)'), [965.3, 0.326e-6]);
+  igualJSON(R('getWaterProps(-10)'), [999.8, 1.787e-6]); igualJSON(R('getWaterProps(200)'), [958.4, 0.294e-6]);
   igualJSON(R('getWaterProps(5)'), [999.9, 1.518e-6]); igualJSON(R('getWaterProps(90)'), [965.3, 0.326e-6]);
+  igual(R('getWaterVaporPressurePa(20)'), 2339); igual(R('getWaterVaporPressurePa(100)'), 101325);
 });
-prueba('getWaterProps(): la densidad baja y la viscosidad baja al subir la temperatura (monótono)', () => {
-  let prev = R('getWaterProps(5)');
-  for (let T = 6; T <= 90; T++) { const w = R(`getWaterProps(${T})`); cierto(w[0] <= prev[0] && w[1] <= prev[1], 'no monótono en ' + T + ' °C'); prev = w; }
+prueba('getWaterProps(): desde 4 °C la densidad baja y desde 0 °C la viscosidad baja al subir la temperatura', () => {
+  let prev = R('getWaterProps(4)');
+  for (let T = 5; T <= 100; T++) { const w = R(`getWaterProps(${T})`); cierto(w[0] <= prev[0] && w[1] <= prev[1], 'no monótono en ' + T + ' °C'); prev = w; }
+  cierto(R('getWaterProps(0)')[1] > R('getWaterProps(4)')[1], 'viscosidad a 0 °C mayor que a 4 °C');
 });
 prueba('getWaterProps(): temperatura no numérica → error claro (antes devolvía undefined)', () => {
   for (const t of ['NaN', 'Infinity', 'undefined', "'abc'"]) lanza(() => R(`getWaterProps(${t})`), /temperatura/, t);
@@ -216,24 +219,37 @@ prueba('pipeCalc(): sin fluido o con viscosidad inválida lanza un error claro; 
   for (const d of ['NaN', 'Infinity', '-Infinity']) igual(R(`pipeCalc(${d}, __a, {rho:998.2, nu:${NU}})`).Q, 0, d);
 });
 
-seccion('Accesorios y válvulas');
-prueba('valveKAtPct(): puntos tabulados, interpolación log-lineal, extrapolación y cierre', () => {
-  igual(R(`valveKAtPct('gate', 100)`), 0.2); igual(R(`valveKAtPct('gate', 50)`), 17); igual(R(`valveKAtPct('globe', 100)`), 10); cercano(R(`valveKAtPct('ball', 10)`), 400, 1e-12);
-  cercano(R(`valveKAtPct('gate', 62.5)`), Math.sqrt(2 * 17), 1e-12, 'media geométrica entre 75 % y 50 %');
+seccion('Accesorios y válvulas (Crane TP 410 y cambios de sección)');
+prueba('valveKAtPct(): puntos calibrados, escala Crane TP 410 por diámetro, interpolación log-lineal y cierre', () => {
+  igual(R(`valveKAtPct('gate', 100)`), 0.15); igual(R(`valveKAtPct('gate', 50)`), 2.70); igual(R(`valveKAtPct('globe', 100)`), 5.80); cercano(R(`valveKAtPct('ball', 67)`), 5.50, 1e-12);
+  cercano(R(`valveKAtPct('gate', 62.5)`), Math.sqrt(0.60 * 2.70), 1e-12, 'media geométrica entre 75 % y 50 %');
+  cercano(R(`valveKAtPct('globe', 100, 77.9, 'crane')`), 340 * R('craneFt(77.9)'), 1e-12, 'globo abierta en DN80 usa 340·fT');
   igual(R(`valveKAtPct('gate', 0)`), Infinity); igual(R(`valveKAtPct('gate', -5)`), Infinity);
-  igual(R(`valveKAtPct('gate', 150)`), 0.2); igual(R(`valveKAtPct('gate', NaN)`), 0.2, 'NaN se toma como 100 %');
+  igual(R(`valveKAtPct('gate', 150)`), 0.15); igual(R(`valveKAtPct('gate', NaN)`), 0.15, 'NaN se toma como 100 %');
   igual(R(`valveKAtPct('inexistente', 50)`), 0);
-  cierto(R(`valveKAtPct('gate', 5)`) > 900, 'por debajo de 10 % extrapola hacia arriba');
+  cierto(R(`valveKAtPct('gate', 5)`) > 120, 'por debajo de 10 % extrapola hacia arriba');
   for (const c of ['gate', 'ball', 'butterfly', 'globe']) { let prev = 0; for (let p = 100; p >= 5; p -= 5) { const k = R(`valveKAtPct('${c}', ${p})`); cierto(k >= prev, c + ' no monótona en ' + p + ' %'); prev = k; } }
 });
-prueba('fittingsK() y arcTotalK(): suma de cantidades × K, curva de apertura, K adicional y válvula cerrada', () => {
-  ctx.__a = R(`mkArc('pipe',1,2,{fitQty:[2,0,1,0,0,0,0,0,0,0,0,0,0,0], customK:1.5})`);
-  cercano(R('fittingsK(__a)'), 2 * 0.9 + 0.4, 1e-12); cercano(R('arcTotalK(__a)'), 2 * 0.9 + 0.4 + 1.5, 1e-12);
-  ctx.__a = R(`mkArc('pipe',1,2,{fitQty:[0,0,0,0,0,1,0,0,0,0,0,0,0,0], fitOpen:[100,100,100,100,100,50,100,100,100,100,100,100,100,100]})`);
-  igual(R('fittingsK(__a)'), 17, 'compuerta al 50 %');
+prueba('craneFt(), fittingsK(), arcTotalK(), kSuddenExpansion() y kSuddenContraction()', () => {
+  igual(R('craneFt(52.5)'), 0.019, 'fT DN50 = 0.019 (Tabla A-26 Crane TP 410)');
+  igual(R('craneFt(77.9)'), 0.018, 'fT DN80 = 0.018 (Tabla A-26 Crane TP 410)');
+  igual(R('craneFt(154.1)'), 0.015, 'fT DN150 = 0.015 (Tabla A-26 Crane TP 410)');
+  // En modo Crane (por defecto): 2 codos 90° (LeD=30) + 1 codo 45° (LeD=16) => (60 + 16) * fT(D)
+  ctx.__a = R(`mkArc('pipe',1,2,{D_mm:77.9, fitQty:[2,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0], customK:1.5})`);
+  const ft80 = R('craneFt(77.9)');
+  cercano(R('fittingsK(__a)'), (2 * 30 + 16) * ft80, 1e-12);
+  cercano(R('arcTotalK(__a)'), (2 * 30 + 16) * ft80 + 1.5, 1e-12);
+  // En modo 'fixed': usa los K fijos históricos (2*0.9 + 0.4)
+  ctx.__af = R(`mkArc('pipe',1,2,{D_mm:77.9, kMethod:'fixed', fitQty:[2,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0], customK:1.5})`);
+  cercano(R('fittingsK(__af)'), 2 * 0.9 + 0.4, 1e-12);
+  // Expansión brusca Borda-Carnot y contracción brusca
+  cercano(R('kSuddenExpansion(50, 100)'), Math.pow(1 - 0.25, 2), 1e-12);
+  cercano(R('kSuddenContraction(100, 50)'), 0.5 * (1 - 0.25), 1e-12);
+  ctx.__a = R(`mkArc('pipe',1,2,{kMethod:'fixed', fitQty:[0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0], fitOpen:[100,100,100,100,100,50,100,100,100,100,100,100,100,100,100,100]})`);
+  cercano(R('fittingsK(__a)'), 2.70, 1e-12, 'compuerta calibrada al 50 %');
   ctx.__a.fitOpen[5] = 0; igual(R('fittingsK(__a)'), Infinity); igual(R('arcTotalK(__a)'), Infinity);
-  ctx.__a = R(`mkArc('valve',1,2,{valveType:'globe', open_pct:50, customK:1})`); ctx.__a.type = 'valve';
-  cercano(R('arcTotalK(__a)'), 45 + 1, 1e-12, 'válvula dedicada: K de la curva + K adicional');
+  ctx.__a = R(`mkArc('valve',1,2,{kMethod:'fixed', valveType:'globe', open_pct:50, customK:1})`); ctx.__a.type = 'valve';
+  cercano(R('arcTotalK(__a)'), 25 + 1, 1e-12, 'válvula dedicada: K de la curva + K adicional');
 });
 prueba('arcAccessoryRows(): una fila por accesorio con cantidad y una más para la válvula dedicada', () => {
   ctx.__a = R(`mkArc('valve',1,2,{valveType:'ball', open_pct:75, fitQty:[1,0,0,0,0,0,2,0,0,0,0,0,0,0]})`); ctx.__a.type = 'valve';
@@ -364,7 +380,7 @@ prueba('bomba por curva y tubería a un tanque alto: punto de operación contra 
     return {nodes:[A,J,B],arcs:[bm,p],fluid:fl};`);
   const s = resolver(r); cierto(s.ok, s.msg);
   const bm = r.arcs[0]; ctx.__a = bm;
-  const Qref = biseccion(Q => R(`pumpHead(${Q}, __a)`) - (15 + hfRef(Q, 150, 200, 0.046, 3 * 0.9, NU)), 0, 399);
+  const Qref = biseccion(Q => R(`pumpHead(${Q}, __a)`) - (15 + hfRef(Q, 150, 200, 0.046, 3 * 30 * R('craneFt(150)'), NU)), 0, 399);
   cercano(s.arcRes[bm.id].Q, Qref, 1e-5, 'caudal de operación');
   cercano(s.arcRes[bm.id].hf, R(`pumpHead(${Qref}, __a)`), 1e-5, 'carga que da la bomba');
   cercano(s.arcRes[bm.id].P_hid, RHO * G * (Qref / 3600) * R(`pumpHead(${Qref}, __a)`) / 1000, 1e-4, 'potencia hidráulica [kW]');
@@ -600,7 +616,10 @@ prueba('sanitizeNode(): ids, tipos y estructura hostiles se rechazan con un erro
 prueba('sanitizeArc(): normaliza números, longitudes de arreglos, curvas y rangos', () => {
   const a = R(`sanitizeArc({id:1, fromId:2, toId:3, type:'pump', label:{x:1}, D_mm:'-5', L_m:'abc', eps_mm:'0,5', fitQty:[1], fitOpen:'no', pumpCurve:[{Q:'0',H:'30'}, null, {Q:'x',H:5}], powerCurve:[{Q:1,P:'z'}], pumpMode:'raro', nPumps:'3', open_pct:150, regime:{a:1}})`);
   igual(a.label, '[object Object]'); igual(a.D_mm, 200); igual(a.L_m, 100); igual(a.eps_mm, 0.046, '«0,5» con coma no es un número de JSON válido → por defecto');
-  igual(a.fitQty.length, 14); igual(a.fitOpen.length, 14); igual(a.fitOpen[0], 100); igual(a.pumpMode, 'curve'); igual(a.nPumps, 3); igual(a.regime, '[object Object]');
+  igual(a.fitQty.length, 16); igual(a.fitQty[0], 0, 'arreglo inválido de longitud 1 se reinicia'); igual(a.fitOpen.length, 16); igual(a.fitOpen[0], 100); igual(a.pumpMode, 'curve'); igual(a.nPumps, 3); igual(a.regime, '[object Object]');
+  // Compatibilidad con proyectos de 14 accesorios (v25/v26): se conservan los primeros 14 y se rellenan con 0 los nuevos
+  const a14 = R(`sanitizeArc({id:1, fromId:2, toId:3, type:'pipe', fitQty:[3,0,0,0,0,1,0,0,0,0,0,0,0,0]})`);
+  igual(a14.fitQty.length, 16); igual(a14.fitQty[0], 3); igual(a14.fitQty[5], 1); igual(a14.fitQty[14], 0); igual(a14.fitQty[15], 0);
   igualJSON(a.pumpCurve, [{ Q: 0, H: 30 }, { Q: 0, H: 0 }, { Q: 0, H: 5 }]); igualJSON(a.powerCurve, [{ Q: 1, P: 0 }]);
   igual(R(`sanitizeArc({id:1, fromId:2, toId:3, type:'valve', open_pct:150}).open_pct`), 100); igual(R(`sanitizeArc({id:1, fromId:2, toId:3, type:'valve', open_pct:-4}).open_pct`), 0);
   igual(R(`sanitizeArc({id:1, fromId:2, toId:3, type:'valve', open_pct:'abc'}).open_pct`), 100);
@@ -658,6 +677,55 @@ prueba('40 redes aleatorias (semilla fija): balance de masa en cada nodo libre y
   }
   cierto(resueltas >= 5, 'se esperaban al menos 5 redes resueltas y hubo ' + resueltas + ' de ' + probadas);
   console.log('      (' + resueltas + ' de ' + probadas + ' redes resueltas · peor desbalance ' + peorBalance.toExponential(2) + ' m³/h)');
+});
+
+seccion('Precisión física v27: densidad, viscosidad ANSI/HI 9.6.7, equipos Kv, tanques y presión estática');
+prueba('v27: subir la densidad ρ NO aumenta el caudal con Equipo Kv ni con nivel líquido en tanque, y escala P_eje manteniendo η < 100 %', () => {
+  const runRho = rho => {
+    const r = red(`const fl={rho:${rho},nu:1.004e-6};
+      const T1=mkNode('tank',0,0,{cota:0,level_m:2,p_bar:0}), J1=mkNode('junction',0,0,{cota:0}), J2=mkNode('junction',0,0,{cota:0}), T2=mkNode('tank',0,0,{cota:5,level_m:4,p_bar:0});
+      const bm=mkArc('pump',T1.id,J1.id,{pumpCurve:[{Q:0,H:40},{Q:100,H:34},{Q:200,H:20},{Q:260,H:0}], powerCurve:[{Q:0,P:5},{Q:100,P:11},{Q:200,P:15},{Q:260,P:17}]});
+      const p1=mkArc('pipe',J1.id,J2.id,{D_mm:102.3,L_m:80}), hx=mkArc('equip',J2.id,T2.id,{D_mm:102.3,dp_bar:1.5});
+      return {nodes:[T1,J1,J2,T2],arcs:[bm,p1,hx],fluid:fl};`);
+    return resolver(r);
+  };
+  const s800 = runRho(800), s1400 = runRho(1400);
+  cierto(s800.ok && s1400.ok);
+  const bm8 = Object.values(s800.arcRes)[0], bm14 = Object.values(s1400.arcRes)[0];
+  cercano(bm8.Q, bm14.Q, 1e-7, 'el caudal de la bomba centrífuga es invariante ante ρ con tanques abiertos y equipo Kv');
+  cercano(bm14.P_eje / bm8.P_eje, 1400 / 800, 1e-7, 'la potencia de eje escala linealmente con ρ');
+  cierto(bm14.P_hid < bm14.P_eje, 'η < 100 % también con fluido pesado (antes P_hid superaba a P_eje)');
+});
+prueba('v27: corrección viscosa ANSI/HI 9.6.7 reduce Q y H de la bomba y aumenta P_eje por rozamiento de disco', () => {
+  const runNu = (nu, corr) => {
+    const r = red(`const fl={rho:900,nu:${nu}};
+      const T1=mkNode('tank',0,0,{cota:0}), J1=mkNode('junction',0,0,{cota:0}), T2=mkNode('tank',0,0,{cota:5});
+      const bm=mkArc('pump',T1.id,J1.id,{viscCorr:${corr}, pumpCurve:[{Q:0,H:40},{Q:100,H:34},{Q:200,H:20},{Q:260,H:0}], powerCurve:[{Q:0,P:5},{Q:100,P:11},{Q:200,P:15}]});
+      const p1=mkArc('pipe',J1.id,T2.id,{D_mm:102.3,L_m:60});
+      return {nodes:[T1,J1,T2],arcs:[bm,p1],fluid:fl};`);
+    const s = resolver(r); cierto(s.ok, s.msg);
+    return Object.values(s.arcRes)[0];
+  };
+  const agua = runNu(1e-6, true), viscOn = runNu(300e-6, true), viscOff = runNu(300e-6, false);
+  igual(agua.C_Q, 1, 'agua 1 cSt no sufre derateo viscoso');
+  cierto(viscOn.viscB > 5 && viscOn.C_Q < 1 && viscOn.C_eta < 0.7, '300 cSt activa factores ANSI/HI');
+  cierto(viscOn.Q < viscOff.Q, 'la curva derateada entrega menos caudal que si se ignora la viscosidad en el rodete');
+  cierto(viscOn.P_eje > viscOff.P_eje * 1.25, 'el rozamiento viscoso del rodete eleva fuertemente P_eje');
+});
+prueba('v27: presión estática real P_est descuenta V²/2g, calcula NPSHa, advierte cavitación y conserva signo en ariete', () => {
+  const r = red(`${FL}
+    const T1=mkNode('tank',0,0,{label:'T1',cota:0,p_bar:0}), J1=mkNode('junction',0,0,{label:'J1',cota:8.5}), J2=mkNode('junction',0,0,{label:'J2',cota:0}), T2=mkNode('tank',0,0,{label:'T2',cota:15});
+    const pSuc=mkArc('pipe',T1.id,J1.id,{D_mm:77.9,L_m:15}), bm=mkArc('pump',J1.id,J2.id,{pumpMode:'fixedQ',fixedQ_m3h:90}), pDes=mkArc('pipe',J2.id,T2.id,{D_mm:77.9,L_m:30});
+    return {nodes:[T1,J1,J2,T2],arcs:[pSuc,bm,pDes],fluid:fl};`);
+  const s = resolver(r); cierto(s.ok, s.msg);
+  const nj1 = s.nodeRes[r.nodes[1].id], p1 = s.arcRes[r.arcs[0].id], bRes = s.arcRes[r.arcs[1].id];
+  cercano(nj1.P - nj1.P_est, p1.velHead * RHO * G / 1e5, 1e-9, 'P_piezo − P_est = ½·ρ·V² en bar');
+  cierto(nj1.cavitation && /cavitación/.test(s.msg), 'succión elevada a 8.5 m entra en cavitación y avisa');
+  cierto(bRes.NPSHa < 0.5 && /NPSHa/.test(s.msg), 'NPSHa crítico detectado');
+  // Ariete con presión negativa de operación conserva el signo (no aplica Math.abs)
+  ctx.__p = R(`mkArc('pipe',1,2,{D_mm:100,L_m:50,wall_mm:6})`); ctx.__p.V = 1.0;
+  const arNeg = R(`calcArieteTramo(__p, {rho:998.2, nu:${NU}}, -0.5)`), arPos = R(`calcArieteTramo(__p, {rho:998.2, nu:${NU}}, 0.5)`);
+  cercano(arPos.P_max_bar - arNeg.P_max_bar, 1.0, 1e-12, 'P_op negativa resta sobre P_max_bar');
 });
 
 correr('Pruebas del motor de cálculo').then(ok => process.exit(ok ? 0 : 1));

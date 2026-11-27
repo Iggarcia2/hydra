@@ -39,7 +39,7 @@ agregar('red de ejemplo de la aplicación (bomba, ramas en paralelo)', `const Ts
   return {nodes:[Ts,J1,J2,J3,Te], arcs:[bm, mkArc('pipe',J1.id,J2.id,{D_mm:150,L_m:120}), mkArc('pipe',J1.id,J3.id,{D_mm:100,L_m:80}), mkArc('pipe',J2.id,Te.id,{D_mm:150,L_m:30}), mkArc('pipe',J3.id,Te.id,{D_mm:100,L_m:30})]};`, AG20);
 agregar('bomba de caudal fijo con accesorios y válvula de globo al 60 %', `const A=mkNode('tank',0,0,{cota:2}), J=mkNode('junction',0,0,{cota:4}), K=mkNode('junction',0,0,{demand:20}), B=mkNode('tank',0,0,{cota:25,p_bar:0.3});
   const bm=mkArc('pump',A.id,J.id,{pumpMode:'fixedQ',fixedQ_m3h:90});
-  const t1=mkArc('pipe',J.id,K.id,{D_mm:100,L_m:150,fitQty:[4,0,0,1,0,0,0,0,1,0,0,0,0,0], fitOpen:[100,100,100,100,100,100,100,100,60,100,100,100,100,100]});
+  const t1=mkArc('pipe',J.id,K.id,{D_mm:100,L_m:150,fitQty:[4,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0], fitOpen:[100,100,100,100,100,100,100,100,60,100,100,100,100,100,100,100]});
   return {nodes:[A,J,K,B], arcs:[bm,t1,mkArc('pipe',K.id,B.id,{D_mm:80,L_m:60,customK:2.5})]};`, AG20);
 agregar('bomba de presión fija', `const A=mkNode('tank',0,0,{cota:0}), J=mkNode('junction',0,0,{cota:3}), K=mkNode('junction',0,0,{demand:15,cota:8}), B=mkNode('tank',0,0,{cota:12});
   return {nodes:[A,J,K,B], arcs:[mkArc('pump',A.id,J.id,{pumpMode:'fixedP',fixedP_bar:4}), mkArc('pipe',J.id,K.id,{D_mm:100,L_m:90}), mkArc('pipe',K.id,B.id,{D_mm:100,L_m:70})]};`, AG20);
@@ -59,7 +59,7 @@ agregar('aceite viscoso (laminar) entre tanques', `const A=mkNode('tank',0,0,{co
   return {nodes:[A,J,B], arcs:[mkArc('pipe',A.id,J.id,{D_mm:102.3,L_m:200,customK:2}), mkArc('pipe',J.id,B.id,{D_mm:77.9,L_m:150})]};`, [900, 4e-4]);
 agregar('fluido muy viscoso (1000 cSt) con bomba y demanda', `const A=mkNode('tank',0,0,{cota:0}), J=mkNode('junction',0,0,{demand:4}), B=mkNode('tank',0,0,{cota:6});
   const bm=mkArc('pump',A.id,J.id,{pumpCurve:[{Q:0,H:40},{Q:20,H:34},{Q:40,H:24},{Q:60,H:10}]});
-  return {nodes:[A,J,B], arcs:[bm, mkArc('pipe',J.id,B.id,{D_mm:77.9,L_m:100,fitQty:[2,0,0,0,0,0,0,0,0,0,0,0,0,0]})]};`, [950, 1e-3]);
+  return {nodes:[A,J,B], arcs:[bm, mkArc('pipe',J.id,B.id,{D_mm:77.9,L_m:100,fitQty:[2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]})]};`, [950, 1e-3]);
 agregar('transición: aceite 20 cSt, flujo con Re entre 2300 y 4000', `const A=mkNode('tank',0,0,{cota:0.7}), J=mkNode('junction',0,0,{}), B=mkNode('tank',0,0,{cota:0});
   return {nodes:[A,J,B], arcs:[mkArc('pipe',A.id,J.id,{D_mm:102.3,L_m:50,eps_mm:0.046}), mkArc('pipe',J.id,B.id,{D_mm:102.3,L_m:50,eps_mm:0.046})]};`, [850, 2e-5]);
 agregar('caudal pequeño (≈0,2 m³/h, DN25) en serie', `const A=mkNode('tank',0,0,{cota:1.3}), J=mkNode('junction',0,0,{}), B=mkNode('tank',0,0,{cota:1});
@@ -82,14 +82,14 @@ for (let i = 1; i <= 60; i++) {
     codigo += `const J${k}=mkNode('junction',0,0,{cota:${red2(u(0, 20))},demand:${rnd() < 0.5 ? 0 : red2(u(2, 25))}}); nodes.push(J${k});`;
     const t = (k === 1 && tipoBomba) ? 'pump' : elegir(['pipe', 'pipe', 'pipe', 'valve', 'check']);
     const D = elegir(DN), L = red2(u(10, 300)), eps = elegir(EPS);
-    const fit = '[' + Array.from({ length: 14 }, () => rnd() < 0.2 ? ent(1, 3) : 0).join(',') + ']';
+    const fit = '[' + Array.from({ length: 16 }, () => rnd() < 0.2 ? ent(1, 3) : 0).join(',') + ']';
     if (t === 'pump') {
       const H0 = red2(u(30, 70)), Qm = ent(150, 450);
       codigo += `arcs.push(mkArc('pump',${previo}.id,J${k}.id,{pumpMode:'${tipoBomba}',fixedQ_m3h:${red2(u(15, 80))},fixedP_bar:${red2(u(2, 6))},nPumps:${elegir([1, 1, 2])},pumpCurve:[{Q:0,H:${H0}},{Q:${Qm * 0.35},H:${red2(H0 * 0.93)}},{Q:${Qm * 0.7},H:${red2(H0 * 0.7)}},{Q:${Qm},H:${red2(H0 * 0.1)}}]}));`;
     } else if (t === 'valve') {
       codigo += `arcs.push(mkArc('valve',${previo}.id,J${k}.id,{D_mm:${D},valveType:'${elegir(['gate', 'ball', 'butterfly', 'globe', 'check'])}',open_pct:${elegir([100, 100, 80, 60, 40])},fitQty:${fit},customK:${rnd() < 0.3 ? red2(u(0.5, 4)) : 0}}));`;
     } else {
-      codigo += `arcs.push(mkArc('${t}',${previo}.id,J${k}.id,{D_mm:${D},L_m:${L},eps_mm:${eps},fitQty:${fit},fitOpen:[${Array.from({ length: 14 }, () => elegir([100, 100, 75, 50])).join(',')}],fouling_mm:${rnd() < 0.2 ? red2(u(0.05, 0.4)) : 0},customK:${rnd() < 0.2 ? red2(u(0.5, 3)) : 0}}));`;
+      codigo += `arcs.push(mkArc('${t}',${previo}.id,J${k}.id,{D_mm:${D},L_m:${L},eps_mm:${eps},fitQty:${fit},fitOpen:[${Array.from({ length: 16 }, () => elegir([100, 100, 75, 50])).join(',')}],fouling_mm:${rnd() < 0.2 ? red2(u(0.05, 0.4)) : 0},customK:${rnd() < 0.2 ? red2(u(0.5, 3)) : 0}}));`;
     }
     previo = 'J' + k;
   }

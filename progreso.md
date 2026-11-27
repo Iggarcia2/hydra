@@ -27,3 +27,8 @@
 **Cómo se comprobó.** 70 unitarias (una nueva con la tabla de la curva), 25 de pantalla (una nueva: se escribe la curva con coma decimal, se calcula, se escribe un texto ilegible y se ve el aviso y la curva intacta; también la lectura del catálogo) y la corrida completa con la comparación contra v25 sin diferencias.
 
 **Qué sigue.** Igual que en la 1.1.0; además, un proyecto guardado con la curva dañada se corrige a mano.
+
+
+## 2026-11-27 · versión 1.2.0 (Hydra v27: precisión normativa Crane TP 410, ANSI/HI 9.6.7, equipos Kv y biblioteca de fluidos)
+
+**Qué se hizo.** Se implementaron las mejoras de precisión detectadas en la auditoría contra Çengel, Robert Mott, Frank White y Crane TP 410: (1) accesorios por método Crane TP 410 (`K = LeD · fT(D)`) con curvas de apertura calibradas, salida sumergida a tanque (`K = 1.0`), entrada abocinada y fórmulas de expansión/contracción brusca; (2) modelo cuadrático `Kv` sin umbral para `Equipo` referenciado a agua, corrigiendo el aumento espurio de caudal al subir la densidad; (3) escala de potencia de eje por densidad (`ρ/ρ_ref`) y corrección de curva H-Q y rendimiento por viscosidad según **ANSI/HI 9.6.7** (`B, C_Q, C_H, C_η`) más cálculo de `NPSHa`; (4) separación de `level_m` y `p_bar` en tanques; (5) cálculo de presión estática real de manómetro (`P_est`, descontando `V²/2g`), alerta de cavitación (`P_abs ≤ Pv`), desglose explícito `hf_major` / `hm_minor` y corrección del signo de `P_op_bar` en golpe de ariete; (6) biblioteca de 19 fluidos de bibliografía universitaria, entrada por `ρ/SG/γ` y `ν/μ`, y series de tubería Sch 40, Sch 80 y Cobre Tipo L.

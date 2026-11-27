@@ -105,21 +105,39 @@
       <div class="sb-section">
         <div class="sb-hdr">Fluido</div>
         <div>
-          <label>Tipo</label>
+          <label>Fluido de trabajo</label>
           <select id="fluid-type" onchange="onFluidChange()">
-            <option value="water">Agua</option>
-            <option value="custom">Personalizado</option>
+            <option value="water">Agua (por temperatura 0–100 °C)</option>
+            <option value="custom">Personalizado…</option>
           </select>
         </div>
-        <div>
+        <div id="water-temp-box">
           <label>Temperatura [°C]</label>
-          <input type="text" inputmode="decimal" id="fluid-temp" value="20" min="5" max="95" step="5" oninput="onFluidChange()">
+          <input type="text" inputmode="decimal" id="fluid-temp" value="20" min="0" max="100" step="5" oninput="onFluidChange()">
         </div>
         <div id="custom-fluid" style="display:none">
           <div><label>Nombre del fluido</label><input type="text" id="fluid-name" placeholder="Fluido personalizado" oninput="onFluidChange()"></div>
           <div class="row2">
-            <div><label>ρ [kg/m³]</label><input type="text" inputmode="decimal" id="fluid-rho" value="998.2" step="0.1" oninput="onFluidChange()"></div>
-            <div><label>ν [×10⁻⁶ m²/s]</label><input type="text" inputmode="decimal" id="fluid-nu" value="1.004" step="0.001" oninput="onFluidChange()"></div>
+            <div>
+              <label>Magnitud densidad</label>
+              <select id="fluid-rho-mode" onchange="onFluidChange()">
+                <option value="rho">ρ [kg/m³]</option>
+                <option value="sg">SG (ref. 1000)</option>
+                <option value="gamma">γ [kN/m³]</option>
+              </select>
+            </div>
+            <div><label id="lbl-fluid-rho">Valor ρ [kg/m³]</label><input type="text" inputmode="decimal" id="fluid-rho" value="998.2" step="0.1" oninput="onFluidChange()"></div>
+          </div>
+          <div class="row2">
+            <div>
+              <label>Magnitud viscosidad</label>
+              <select id="fluid-visc-mode" onchange="onFluidChange()">
+                <option value="nu_cst">ν [×10⁻⁶ m²/s · cSt]</option>
+                <option value="mu_pas">μ [Pa·s]</option>
+                <option value="mu_cp">μ [cP · mPa·s]</option>
+              </select>
+            </div>
+            <div><label id="lbl-fluid-nu">Valor ν [cSt]</label><input type="text" inputmode="decimal" id="fluid-nu" value="1.004" step="0.001" oninput="onFluidChange()"></div>
           </div>
         </div>
         <div class="info-box" id="fluid-info">ρ = 998.2 kg/m³ · ν = 1.004×10⁻⁶ m²/s</div>
@@ -311,13 +329,13 @@
         </div>
         <div class="res-pane" id="rpane-nodes-res">
           <table class="res" id="nodes-res-table">
-            <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th class="num">Cota [m]</th><th class="num">H [m]</th><th class="num">P [bar]</th><th class="num">Demanda [m³/h]</th></tr></thead>
+            <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th class="num">Cota [m]</th><th class="num">H [m]</th><th class="num" title="Presión piezométrica: ρ·g·(H − z)">P piezo [bar]</th><th class="num" title="Presión estática real de manómetro: ρ·g·(H − z − V²/2g)">P manóm. [bar]</th><th class="num">Demanda [m³/h]</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
         <div class="res-pane" id="rpane-arcs-res">
           <table class="res" id="arcs-res-table">
-            <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>De → A</th><th class="num">Q [m³/h]</th><th class="num">V [m/s]</th><th class="num">ΔH [m]</th><th class="num">Re</th><th>Régimen</th><th class="num">P hid [kW]</th><th class="num">P eje [kW]</th></tr></thead>
+            <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>De → A</th><th class="num">Q [m³/h]</th><th class="num">V [m/s]</th><th class="num" title="Pérdida primaria por fricción recta">hf [m]</th><th class="num" title="Pérdida menor por accesorios">hm [m]</th><th class="num" title="Salto de carga total del tramo">ΔH [m]</th><th class="num">Re</th><th>Régimen</th><th class="num">P hid [kW]</th><th class="num">P eje [kW]</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>

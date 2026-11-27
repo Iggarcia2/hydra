@@ -22,24 +22,27 @@ function exportExcel() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resData), 'Resumen');
 
   // Hoja 2: Nodos
-  const nodesRows = [['ID','Nombre','Tipo','Cota [m]','H [m]','P [bar]','Demanda [m3/h]']];
+  const nodesRows = [['ID','Nombre','Tipo','Cota [m]','Nivel líq. [m]','H [m]','P piezo [bar]','P manóm. [bar]','Demanda [m3/h]']];
   for (const n of state.nodes) nodesRows.push([
-    n.id, n.label, n.type, n.cota??0,
+    n.id, n.label, n.type, n.cota??0, n.level_m??0,
     n.H!=null?+(+n.H).toFixed(4):null,
     n.P!=null?+(+n.P).toFixed(4):null,
+    (n.P_est??n.P)!=null?+(+(n.P_est??n.P)).toFixed(4):null,
     n.demand||0
   ]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(nodesRows), 'Nodos');
 
   // Hoja 3: Arcos
-  const arcsRows = [['ID','Nombre','Tipo','De','A','Q [m3/h]','V [m/s]','dH [m]','Re','Regimen','f','P_hid [kW]','P_eje [kW]']];
+  const arcsRows = [['ID','Nombre','Tipo','De','A','Q [m3/h]','V [m/s]','hf [m]','hm [m]','dH [m]','Re','Regimen','f','P_hid [kW]','P_eje [kW]','NPSHa [m]']];
   for (const a of state.arcs) {
     const fr=findNode(a.fromId), t=findNode(a.toId);
     arcsRows.push([a.id, a.label, a.type, fr?.label||'?', t?.label||'?',
       a.Q!=null?+(+a.Q).toFixed(3):null, a.V!=null?+(+a.V).toFixed(4):null,
+      a.hf_major!=null?+(+a.hf_major).toFixed(3):null, a.hm_minor!=null?+(+a.hm_minor).toFixed(3):null,
       a.hf!=null?+(+a.hf).toFixed(3):null, a.Re!=null?Math.round(a.Re):null,
       a.regime||'-', a.f!=null?+(+a.f).toFixed(6):null,
-      a.P_hid!=null?+(+a.P_hid).toFixed(3):null, a.P_eje!=null?+(+a.P_eje).toFixed(3):null
+      a.P_hid!=null?+(+a.P_hid).toFixed(3):null, a.P_eje!=null?+(+a.P_eje).toFixed(3):null,
+      a.NPSHa!=null?+(+a.NPSHa).toFixed(3):null
     ]);
   }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(arcsRows), 'Arcos');
